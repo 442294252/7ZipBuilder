@@ -21,9 +21,9 @@ jobs:
       - name: Build
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Build.ps1
-      - name: Pack
+      - name: Package.ps1
         shell: pwsh
-        run: Get-Content -Path 7zVer.txt | .\Pack.ps1
+        run: Get-Content -Path 7zVer.txt | .\Package.ps1
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
