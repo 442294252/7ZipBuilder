@@ -23,7 +23,7 @@ jobs:
         run: Get-Content -Path 7zVer.txt | .\Build.ps1
       - name: Pack
         shell: pwsh
-        # 关键修改：将 .\Pack.ps1 改为 .\Package.ps1（匹配仓库实际脚本名）
+        # 关键修改：Pack.ps1 → Package.ps1，匹配仓库实际脚本名
         # 额外优化：用 & 显式调用，避免路径解析问题
         run: Get-Content -Path 7zVer.txt | & "$PWD\Package.ps1"
       - name: Upload
