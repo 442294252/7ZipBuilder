@@ -11,10 +11,10 @@ jobs:
         shell: pwsh
         run: |
           $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html'
-          $7zVerMatchInfo = Select-String -InputObject $7zHtml.Content -Pattern 'Download 7-Zip ([\d.]+) \(\d{4}-\d{2}-\d{2}\)'
+          $7zVerMatchInfo = Select-String -InputObject $7zHtml.Content -Pattern 'Download 7-Zip ([\d.]+) \('
           $7zVer = $7zVerMatchInfo.Matches.Groups[1].Value.Replace('.', '')
           Set-Content -Path 7zVer.txt -Value "7z$7zVer"
-          Write-Output "The latest version of 7-Zip is 7z$7zVer."
+          Write-Output "The latest version of 7-zip is 7z$7zVer."
       - name: Prepare
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Prepare.ps1
@@ -23,7 +23,9 @@ jobs:
         run: Get-Content -Path 7zVer.txt | .\Build.ps1
       - name: Pack
         shell: pwsh
-        run: Get-Content -Path 7zVer.txt | .\Pack.ps1
+        # 关键修改：将 .\Pack.ps1 改为 .\Package.ps1（匹配仓库实际脚本名）
+        # 额外优化：用 & 显式调用，避免路径解析问题
+        run: Get-Content -Path 7zVer.txt | & "$PWD\Package.ps1"
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
