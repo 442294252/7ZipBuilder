@@ -31,7 +31,6 @@ jobs:
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Pack.ps1
 
-      # 关键：定位安装包，避免“自己覆盖自己”
       - name: Locate installer
         shell: pwsh
         run: |
@@ -46,6 +45,31 @@ jobs:
             exit 1
           }
 
+      # 新增：检查并删除已存在的 Release 和标签
+      - name: Delete existing release and tag
+        shell: pwsh
+        run: |
+          $tagName = "${{ env.BUILD_VERSION }}"
+          # 检查标签是否存在
+          $tagExists = git ls-remote --tags origin "refs/tags/$tagName"
+          if ($tagExists) {
+            Write-Host "⚠️ 标签 $tagName 已存在，正在删除旧 Release 和标签..."
+            # 删除旧 Release
+            $release = gh release view $tagName --json id -q '.id'
+            if ($release) {
+              gh release delete $release --yes
+              Write-Host "✅ 已删除旧 Release"
+            }
+            # 删除本地和远程标签
+            git tag -d $tagName
+            git push origin :refs/tags/$tagName
+            Write-Host "✅ 已删除标签 $tagName"
+          } else {
+            Write-Host "✅ 标签 $tagName 不存在，可以正常创建"
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
@@ -57,13 +81,12 @@ jobs:
           draft: false
           prerelease: false
 
-      # 直接使用找到的路径上传，不再复制
       - name: Upload Installer to Release
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ env.INSTALLER_PATH }}  # 直接使用找到的完整路径
+          asset_path: ${{ env.INSTALLER_PATH }}
           asset_name: 7z-${{ env.BUILD_VERSION }}-Custom-Icon.exe
           asset_content_type: application/x-msdownload
