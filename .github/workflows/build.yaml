@@ -7,25 +7,36 @@ jobs:
     steps:
       - name: Check out git repository
         uses: actions/checkout@v4
+
       - name: Get latest version
         shell: pwsh
         run: |
           $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html'
           $7zVerMatchInfo = Select-String -InputObject $7zHtml.Content -Pattern 'Download 7-Zip ([\d.]+) \('
           $7zVer = $7zVerMatchInfo.Matches.Groups[1].Value.Replace('.', '')
-          Set-Content -Path 7zVer.txt -Value "7z$7zVer"
-          Write-Output "The latest version of 7-zip is 7z$7zVer."
-      - name: Prepare
+          $buildVersion = "7z$7zVer"
+          Set-Content -Path 7zVer.txt -Value $buildVersion
+          Write-Output "✅ 7-Zip目标版本：$buildVersion"
+
+      - name: Prepare (修复传参)
         shell: pwsh
-        run: Get-Content -Path 7zVer.txt | .\Prepare.ps1
-      - name: Build
+        run: |
+          $buildVersion = Get-Content -Path 7zVer.txt -Raw
+          # 直接传递位置参数，彻底替代管道传参
+          .\Prepare.ps1 -BuildDirectory ".\$buildVersion" -BuildVersion $buildVersion
+
+      - name: Build (修复传参)
         shell: pwsh
-        run: Get-Content -Path 7zVer.txt | .\Build.ps1
-      - name: Pack
+        run: |
+          $buildVersion = Get-Content -Path 7zVer.txt -Raw
+          .\Build.ps1 -BuildVersion $buildVersion
+
+      - name: Pack (修复传参)
         shell: pwsh
-        # 关键修改：Pack.ps1 → Package.ps1，匹配仓库实际脚本名
-        # 额外优化：用 & 显式调用，避免路径解析问题
-        run: Get-Content -Path 7zVer.txt | & "$PWD\Package.ps1"
+        run: |
+          $buildVersion = Get-Content -Path 7zVer.txt -Raw
+          & "$PWD\Package.ps1" -BuildVersion $buildVersion
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
