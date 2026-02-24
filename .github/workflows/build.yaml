@@ -7,35 +7,23 @@ jobs:
     steps:
       - name: Check out git repository
         uses: actions/checkout@v4
-
       - name: Get latest version
         shell: pwsh
         run: |
           $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html'
           $7zVerMatchInfo = Select-String -InputObject $7zHtml.Content -Pattern 'Download 7-Zip ([\d.]+) \(\d{4}-\d{2}-\d{2}\)'
           $7zVer = $7zVerMatchInfo.Matches.Groups[1].Value.Replace('.', '')
-          $buildVersion = "7z$7zVer"
-          Set-Content -Path 7zVer.txt -Value $buildVersion
-          Write-Output "✅ The latest version of 7-Zip is $buildVersion"
-
-      - name: Prepare (彻底绕过参数传递)
+          Set-Content -Path 7zVer.txt -Value "7z$7zVer"
+          Write-Output "The latest version of 7-Zip is 7z$7zVer."
+      - name: Prepare
         shell: pwsh
-        run: |
-          # 关键：不传递任何参数，让Prepare.ps1自己去读7zVer.txt
-          .\Prepare.ps1
-
+        run: Get-Content -Path 7zVer.txt | .\Prepare.ps1
       - name: Build
         shell: pwsh
-        run: |
-          $buildVersion = (Get-Content -Path 7zVer.txt -Raw).Trim()
-          .\Build.ps1 $buildVersion
-
+        run: Get-Content -Path 7zVer.txt | .\Build.ps1
       - name: Pack
         shell: pwsh
-        run: |
-          $buildVersion = (Get-Content -Path 7zVer.txt -Raw).Trim()
-          .\Package.ps1 $buildVersion
-
+        run: Get-Content -Path 7zVer.txt | .\Pack.ps1
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
