@@ -18,24 +18,24 @@ jobs:
           Set-Content -Path 7zVer.txt -Value $buildVersion
           Write-Output "✅ 7-Zip目标版本：$buildVersion"
 
-      - name: Prepare (适配原生脚本)
+      - name: Prepare (适配原生脚本，修复参数传递)
         shell: pwsh
         run: |
           $buildVersion = Get-Content -Path 7zVer.txt -Raw
-          # 作为位置参数传递，与原生脚本的param([string]$BuildVersion)匹配
-          .\Prepare.ps1 $buildVersion
+          # 关键：使用双引号包裹变量，强制PowerShell在调用前展开变量值
+          .\Prepare.ps1 "$buildVersion"
 
       - name: Build (适配原生脚本)
         shell: pwsh
         run: |
           $buildVersion = Get-Content -Path 7zVer.txt -Raw
-          .\Build.ps1 $buildVersion
+          .\Build.ps1 "$buildVersion"
 
       - name: Pack (适配原生脚本)
         shell: pwsh
         run: |
           $buildVersion = Get-Content -Path 7zVer.txt -Raw
-          .\Package.ps1 $buildVersion
+          .\Package.ps1 "$buildVersion"
 
       - name: Upload
         uses: actions/upload-artifact@v4
