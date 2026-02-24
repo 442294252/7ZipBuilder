@@ -8,6 +8,23 @@ jobs:
       - name: Check out git repository
         uses: actions/checkout@v4
 
+      # ========== 核心优化1：缓存编译产物（大幅缩短Build耗时） ==========
+      - name: Cache 7-Zip build artifacts
+        uses: actions/cache@v4
+        with:
+          # 缓存编译后的中间文件和产物
+          path: |
+            ${{ github.workspace }}\7z*\**\*.obj
+            ${{ github.workspace }}\7z*\**\*.lib
+            ${{ github.workspace }}\7z*\**\*.dll
+            ${{ github.workspace }}\7z*\**\*.exe
+            ${{ github.workspace }}\Temp
+          # 按版本号缓存，版本不变则复用缓存
+          key: ${{ runner.os }}-7zip-build-${{ hashFiles('7zVer.txt') }}
+          # 回退：复用同系统的最新缓存
+          restore-keys: |
+            ${{ runner.os }}-7zip-build-
+
       - name: Get latest version
         shell: pwsh
         run: |
@@ -18,7 +35,6 @@ jobs:
           Set-Content -Path 7zVer.txt -Value $buildVersion
           Write-Output "The latest version of 7-Zip is $buildVersion."
           echo "BUILD_VERSION=$buildVersion" >> $env:GITHUB_ENV
-          echo "INSTALLER_PATH=$workDir\$buildVersion.exe" >> $env:GITHUB_ENV
 
       - name: Prepare
         shell: pwsh
@@ -32,27 +48,26 @@ jobs:
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Pack.ps1
 
-      # 清理旧标签/Release（避免already_exists）
-      - name: Delete existing release and tag
+      # ========== 优化2：精简清理逻辑，减少无意义耗时 ==========
+      - name: Clean up old release/tag
         shell: pwsh
         run: |
           $tagName = "${{ env.BUILD_VERSION }}"
-          $tagExists = git ls-remote --tags origin "refs/tags/$tagName"
+          # 仅检查标签是否存在，不存在则直接跳过
+          $tagExists = git ls-remote --tags origin "refs/tags/$tagName" 2>$null
           if ($tagExists) {
-            Write-Host "⚠️ 标签 $tagName 已存在，清理旧版本..."
-            # 删除旧Release
+            Write-Host "⚠️ Clean up old release/tag: $tagName"
             gh release delete $tagName --yes 2>$null
-            # 删除标签
             git tag -d $tagName 2>$null
             git push origin :refs/tags/$tagName 2>$null
-            Write-Host "✅ 已清理旧标签/Release"
           }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # ========== 核心优化3：升级Action版本，消除弃用警告 ==========
       - name: Create GitHub Release
         id: create_release
-        uses: actions/create-release@v1
+        uses: actions/create-release@v2  # 升级到v2，消除set-output警告
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -61,13 +76,12 @@ jobs:
           draft: false
           prerelease: false
 
-      # 直接使用Pack.ps1的输出路径上传（根目录下的$BuildVersion.exe）
       - name: Upload Installer to Release
-        uses: actions/upload-release-asset@v1
+        uses: actions/upload-release-asset@v2  # 升级到v2，消除set-output警告
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./${{ env.BUILD_VERSION }}.exe  # 精准指向Pack.ps1生成的文件
+          asset_path: ./${{ env.BUILD_VERSION }}.exe
           asset_name: 7z-${{ env.BUILD_VERSION }}-Custom-Icon.exe
           asset_content_type: application/x-msdownload
