@@ -10,6 +10,9 @@
 说在前面，我不是程序员，没学过代码
 这是利用豆包修改的脚本以及原大佬的资源弄的
 主要修改了Build.yaml。豆包编写了数个版本的脚本一一试下来，编译成功了。
+<img width="589" height="360" alt="image" src="https://github.com/user-attachments/assets/f98cf8f3-8268-41b3-ad8f-2a791f7af5e8" />
+<img width="431" height="386" alt="image" src="https://github.com/user-attachments/assets/9722976c-ee4e-4a06-ac3b-e6b70f5220bd" />
+
 
 
 ### 本机编译
