@@ -17,7 +17,6 @@ jobs:
           $buildVersion = "7z$7zVer"
           Set-Content -Path 7zVer.txt -Value $buildVersion
           Write-Output "The latest version of 7-Zip is $buildVersion."
-          # 新增：将版本号存入环境变量，供后续发布步骤使用
           echo "BUILD_VERSION=$buildVersion" >> $env:GITHUB_ENV
 
       - name: Prepare
@@ -32,31 +31,38 @@ jobs:
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Pack.ps1
 
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: 7-Zip Installer
-          path: ./*.exe
-          if-no-files-found: error
+      # 关键：先把安装包复制到工作目录根目录
+      - name: Copy installer to root
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path . -Recurse -Filter "*.exe" | Select-Object -First 1
+          if ($installer) {
+            Copy-Item -Path $installer.FullName -Destination .\
+            Write-Host "✅ 已复制安装包到工作目录：$($installer.Name)"
+            echo "INSTALLER_NAME=$($installer.Name)" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "❌ 未找到任何 .exe 安装包"
+            exit 1
+          }
 
-      # ========== 新增：自动创建Release并上传安装包 ==========
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub内置令牌，无需手动配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ env.BUILD_VERSION }}  # 标签名与7-Zip版本一致（如7z2600）
-          release_name: 7-Zip ${{ env.BUILD_VERSION }} (Custom Icon)  # Release名称
-          draft: false  # 直接发布，不设为草稿
-          prerelease: false  # 非预发布版本
+          tag_name: ${{ env.BUILD_VERSION }}
+          release_name: 7-Zip ${{ env.BUILD_VERSION }} (Custom Icon)
+          draft: false
+          prerelease: false
 
+      # 直接上传 .exe 到 Release，不再经过 Artifact 打包
       - name: Upload Installer to Release
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}  # 关联上面创建的Release
-          asset_path: ./*.exe  # 编译好的安装包路径
-          asset_name: 7z-${{ env.BUILD_VERSION }}-Custom-Icon.exe  # 上传后的文件名（易识别）
-          asset_content_type: application/x-msdownload  # Windows EXE文件标准类型
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./${{ env.INSTALLER_NAME }}  # 直接使用找到的安装包名
+          asset_name: 7z-${{ env.BUILD_VERSION }}-Custom-Icon.exe
+          asset_content_type: application/x-msdownload
