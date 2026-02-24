@@ -8,23 +8,6 @@ jobs:
       - name: Check out git repository
         uses: actions/checkout@v4
 
-      # 核心优化：缓存编译产物（大幅缩短Build耗时）
-      - name: Cache 7-Zip build artifacts
-        uses: actions/cache@v4
-        with:
-          # 缓存编译后的中间文件和产物
-          path: |
-            ${{ github.workspace }}\7z*\**\*.obj
-            ${{ github.workspace }}\7z*\**\*.lib
-            ${{ github.workspace }}\7z*\**\*.dll
-            ${{ github.workspace }}\7z*\**\*.exe
-            ${{ github.workspace }}\Temp
-          # 按版本号缓存，版本不变则复用缓存
-          key: ${{ runner.os }}-7zip-build-${{ hashFiles('7zVer.txt') }}
-          # 回退：复用同系统的最新缓存
-          restore-keys: |
-            ${{ runner.os }}-7zip-build-
-
       - name: Get latest version
         shell: pwsh
         run: |
@@ -40,6 +23,22 @@ jobs:
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Prepare.ps1
 
+      # 调整缓存步骤到Prepare之后，只缓存编译产物
+      - name: Cache 7-Zip build artifacts
+        uses: actions/cache@v4
+        with:
+          # 只缓存编译后的中间文件和产物，不缓存源码目录
+          path: |
+            ${{ github.workspace }}\7z*\**\*.obj
+            ${{ github.workspace }}\7z*\**\*.lib
+            ${{ github.workspace }}\7z*\**\*.dll
+            ${{ github.workspace }}\7z*\**\*.exe
+            ${{ github.workspace }}\Temp
+          # 按版本号+源码哈希缓存，确保目录结构一致
+          key: ${{ runner.os }}-7zip-build-${{ hashFiles('7zVer.txt', 'Prepare.ps1', 'SubPrepare.ps1') }}
+          restore-keys: |
+            ${{ runner.os }}-7zip-build-
+
       - name: Build
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Build.ps1
@@ -48,12 +47,10 @@ jobs:
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Pack.ps1
 
-      # 精简清理逻辑，减少无意义耗时
       - name: Clean up old release/tag
         shell: pwsh
         run: |
           $tagName = "${{ env.BUILD_VERSION }}"
-          # 仅检查标签是否存在，不存在则直接跳过
           $tagExists = git ls-remote --tags origin "refs/tags/$tagName" 2>$null
           if ($tagExists) {
             Write-Host "⚠️ Clean up old release/tag: $tagName"
@@ -64,10 +61,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 回退到v1版本，保证Action可解析（同时保留缓存优化）
       - name: Create GitHub Release
         id: create_release
-        uses: actions/create-release@v1  # 回退到v1
+        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -77,7 +73,7 @@ jobs:
           prerelease: false
 
       - name: Upload Installer to Release
-        uses: actions/upload-release-asset@v1  # 回退到v1
+        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
