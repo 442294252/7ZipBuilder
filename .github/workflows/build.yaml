@@ -8,66 +8,40 @@ jobs:
       - name: Check out git repository
         uses: actions/checkout@v4
 
-      # 修复版：精准解析最新版本号，避免URL拼接错误
-      - name: Get latest 7-Zip version (fixed parser)
+      - name: Get latest version
         shell: pwsh
         run: |
-          try {
-              # 1. 下载7-Zip官网页面
-              $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html' -UseBasicParsing
-              
-              # 2. 精准匹配最新版本号（修复正则，避免多余字符）
-              # 匹配格式：Download 7-Zip 24.09 (x64) → 提取24.09 → 转为2409 → 拼接7z2409
-              $versionMatch = [regex]::Match($7zHtml.Content, 'Download 7-Zip ([\d\.]+) \(x64\)')
-              
-              if ($versionMatch.Success) {
-                  $rawVersion = $versionMatch.Groups[1].Value  # 如 24.09
-                  $cleanVersion = $rawVersion.Replace('.', '') # 如 2409
-                  $buildVersion = "7z$cleanVersion"            # 如 7z2409
-                  
-                  # 3. 验证源码URL是否存在（关键：提前校验，避免404）
-                  $sourceUrl = "https://www.7-zip.org/a/$buildVersion-src.7z"
-                  $urlTest = Invoke-WebRequest -Uri $sourceUrl -Method Head -UseBasicParsing -ErrorAction Stop
-                  
-                  # 4. 写入版本文件
-                  Set-Content -Path 7zVer.txt -Value $buildVersion
-                  Write-Output "✅ 成功获取最新版本：$buildVersion (原始版本：$rawVersion)"
-                  Write-Output "✅ 源码URL验证通过：$sourceUrl"
-              }
-              else {
-                  Write-Error "❌ 解析7-Zip版本号失败，使用备用稳定版7z2409"
-                  $buildVersion = "7z2409"
-                  Set-Content -Path 7zVer.txt -Value $buildVersion
-              }
-          }
-          catch {
-              Write-Error "❌ 获取最新版本失败：$($_.Exception.Message)，使用备用稳定版7z2409"
-              $buildVersion = "7z2409"
-              Set-Content -Path 7zVer.txt -Value $buildVersion
-          }
+          $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html'
+          # 修正正则，匹配官网最新版本格式（如 Download 7-Zip 24.09 (2024-09-05)）
+          $7zVerMatchInfo = Select-String -InputObject $7zHtml.Content -Pattern 'Download 7-Zip ([\d.]+) \(\d{4}-\d{2}-\d{2}\)'
+          $7zVer = $7zVerMatchInfo.Matches.Groups[1].Value.Replace('.', '')
+          $buildVersion = "7z$7zVer"
+          Set-Content -Path 7zVer.txt -Value $buildVersion
+          Write-Output "✅ The latest version of 7-Zip is $buildVersion"
 
-      # 适配原生脚本：纯位置参数传递，无解析歧义
-      - name: Prepare (native script compatible)
+      - name: Prepare
         shell: pwsh
         run: |
           $buildVersion = (Get-Content -Path 7zVer.txt -Raw).Trim()
+          # 改为位置参数传递，避免管道解析问题
           .\Prepare.ps1 $buildVersion
 
-      - name: Build (native script compatible)
+      - name: Build
         shell: pwsh
         run: |
           $buildVersion = (Get-Content -Path 7zVer.txt -Raw).Trim()
           .\Build.ps1 $buildVersion
 
-      - name: Pack (native script compatible)
+      - name: Pack
         shell: pwsh
         run: |
           $buildVersion = (Get-Content -Path 7zVer.txt -Raw).Trim()
+          # 关键修复：Pack.ps1 → Package.ps1（匹配仓库实际脚本名）
           .\Package.ps1 $buildVersion
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: 7-Zip Installer (Latest Version)
+          name: 7-Zip Installer
           path: ./*.exe
           if-no-files-found: error
