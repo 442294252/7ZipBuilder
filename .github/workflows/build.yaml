@@ -12,19 +12,17 @@ jobs:
         shell: pwsh
         run: |
           $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html'
-          # 修正正则，匹配官网最新版本格式（如 Download 7-Zip 24.09 (2024-09-05)）
           $7zVerMatchInfo = Select-String -InputObject $7zHtml.Content -Pattern 'Download 7-Zip ([\d.]+) \(\d{4}-\d{2}-\d{2}\)'
           $7zVer = $7zVerMatchInfo.Matches.Groups[1].Value.Replace('.', '')
           $buildVersion = "7z$7zVer"
           Set-Content -Path 7zVer.txt -Value $buildVersion
           Write-Output "✅ The latest version of 7-Zip is $buildVersion"
 
-      - name: Prepare
+      - name: Prepare (彻底绕过参数传递)
         shell: pwsh
         run: |
-          $buildVersion = (Get-Content -Path 7zVer.txt -Raw).Trim()
-          # 改为位置参数传递，避免管道解析问题
-          .\Prepare.ps1 $buildVersion
+          # 关键：不传递任何参数，让Prepare.ps1自己去读7zVer.txt
+          .\Prepare.ps1
 
       - name: Build
         shell: pwsh
@@ -36,7 +34,6 @@ jobs:
         shell: pwsh
         run: |
           $buildVersion = (Get-Content -Path 7zVer.txt -Raw).Trim()
-          # 关键修复：Pack.ps1 → Package.ps1（匹配仓库实际脚本名）
           .\Package.ps1 $buildVersion
 
       - name: Upload
