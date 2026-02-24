@@ -1,85 +1,94 @@
 <#
-  兼容版：无参数也能执行，完全复刻“无脚本时构建成功”的逻辑，同时替换图标
-  核心：优先从7zVer.txt读版本号，参数仅作为兜底，避免参数错误中断构建
+  终极无参数版：彻底规避参数解析问题，直接硬编码所有路径
 #>
-# ==================== 第一步：参数容错（核心！避免构建中断） ====================
-param(
-    # 定义参数，但允许为空（容错）
-    [string] $BuildDirectory = "",
-    [string] $BuildVersion = ""
-)
 
-# 仓库根目录（固定，在线编译时脚本所在目录就是仓库根）
+# ==================== 固定路径定义（与仓库结构100%对应） ====================
+# 仓库根目录（脚本所在目录）
 $workDir = $PSScriptRoot
 # 资源目录（你上传的Resources文件夹）
 $resDir = "$workDir\Resources"
+# 从7zVer.txt读取版本号，拼接源码目录
+$buildVersion = Get-Content -Path "$workDir\7zVer.txt" -Raw -ErrorAction SilentlyContinue
+$BuildDirectory = "$workDir\$buildVersion"
 
-# 优先从7zVer.txt读取版本号（原生脚本生成，100%准确），参数仅兜底
-if (-not $BuildVersion -or $BuildVersion -eq "") {
-    $BuildVersion = Get-Content -Path "$workDir\7zVer.txt" -Raw -ErrorAction SilentlyContinue
-}
-# 优先拼接源码目录，参数仅兜底
-if (-not $BuildDirectory -or $BuildDirectory -eq "") {
-    $BuildDirectory = "$workDir\$BuildVersion"
-}
-
-# ==================== 第二步：调试日志（仅输出，不中断） ====================
-Write-Host "`n===== [兼容版资源替换] 开始执行 =====`n" -ForegroundColor Cyan
-Write-Host "✅ 7-Zip版本：$BuildVersion"
+# ==================== 调试日志 ====================
+Write-Host "`n===== [终极无参数资源替换] 开始执行 =====`n" -ForegroundColor Cyan
+Write-Host "✅ 7-Zip版本：$buildVersion"
 Write-Host "✅ 源码目录：$BuildDirectory"
 Write-Host "✅ 资源目录：$resDir"
+Write-Host "✅ 资源目录是否存在：$(Test-Path $resDir)" -ForegroundColor Green
 
-# ==================== 第三步：资源替换（所有操作加ErrorAction SilentlyContinue，不中断构建） ====================
-# 1. 替换格式图标
+# ==================== 替换格式图标（FileIcons/*.ico） ====================
 $iconTarget = "$BuildDirectory\CPP\7zip\Archive\Icons"
-try {
-    if (Test-Path "$resDir\FileIcons\*.ico" -and Test-Path $iconTarget) {
-        Copy-Item -Force -Recurse -Path "$resDir\FileIcons\*.ico" -Destination $iconTarget -ErrorAction Stop
-        Write-Host "✅ 替换格式图标完成" -ForegroundColor Green
-    } else {
-        Write-Host "⚠️ 格式图标路径缺失（不影响构建）" -ForegroundColor Yellow
+Write-Host "`n--- 替换格式图标 ---" -ForegroundColor Cyan
+Write-Host "目标路径：$iconTarget"
+if (Test-Path "$resDir\FileIcons\*.ico" -and Test-Path $iconTarget) {
+    try {
+        # 用数组方式传递参数，彻底避免解析问题
+        $source = "$resDir\FileIcons\*.ico"
+        $dest = $iconTarget
+        Write-Host "执行：Copy-Item -Force -Recurse -Path $source -Destination $dest"
+        Copy-Item -Force -Recurse -Path $source -Destination $dest -ErrorAction Stop
+        Write-Host "✅ 格式图标替换成功" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ 格式图标替换失败：$($_.Exception.Message)" -ForegroundColor Red
     }
-} catch {
-    Write-Host "⚠️ 格式图标替换失败（不影响构建）：$($_.Exception.Message)" -ForegroundColor Yellow
+} else {
+    Write-Host "❌ 格式图标路径缺失（本地/源码）" -ForegroundColor Red
 }
 
-# 2. 替换Format7zF.rc
+# ==================== 替换Format7zF.rc ====================
 $format7zFTarget = "$BuildDirectory\CPP\7zip\Bundles\Format7zF\resource.rc"
-try {
-    if (Test-Path "$resDir\Format7zF.rc" -and Test-Path (Split-Path $format7zFTarget)) {
-        Copy-Item -Force -Path "$resDir\Format7zF.rc" -Destination $format7zFTarget -ErrorAction Stop
-        Write-Host "✅ 替换Format7zF.rc完成" -ForegroundColor Green
-    } else {
-        Write-Host "⚠️ Format7zF.rc路径缺失（不影响构建）" -ForegroundColor Yellow
+Write-Host "`n--- 替换Format7zF.rc ---" -ForegroundColor Cyan
+Write-Host "目标路径：$format7zFTarget"
+if (Test-Path "$resDir\Format7zF.rc" -and Test-Path (Split-Path $format7zFTarget)) {
+    try {
+        $source = "$resDir\Format7zF.rc"
+        $dest = $format7zFTarget
+        Write-Host "执行：Copy-Item -Force -Path $source -Destination $dest"
+        Copy-Item -Force -Path $source -Destination $dest -ErrorAction Stop
+        Write-Host "✅ Format7zF.rc替换成功" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ Format7zF.rc替换失败：$($_.Exception.Message)" -ForegroundColor Red
     }
-} catch {
-    Write-Host "⚠️ Format7zF.rc替换失败（不影响构建）：$($_.Exception.Message)" -ForegroundColor Yellow
+} else {
+    Write-Host "❌ Format7zF.rc路径缺失（本地/源码）" -ForegroundColor Red
 }
 
-# 3. 替换Fm.rc
+# ==================== 替换Fm.rc ====================
 $fmTarget = "$BuildDirectory\CPP\7zip\Bundles\Fm\resource.rc"
-try {
-    if (Test-Path "$resDir\Fm.rc" -and Test-Path (Split-Path $fmTarget)) {
-        Copy-Item -Force -Path "$resDir\Fm.rc" -Destination $fmTarget -ErrorAction Stop
-        Write-Host "✅ 替换Fm.rc完成" -ForegroundColor Green
-    } else {
-        Write-Host "⚠️ Fm.rc路径缺失（不影响构建）" -ForegroundColor Yellow
+Write-Host "`n--- 替换Fm.rc ---" -ForegroundColor Cyan
+Write-Host "目标路径：$fmTarget"
+if (Test-Path "$resDir\Fm.rc" -and Test-Path (Split-Path $fmTarget)) {
+    try {
+        $source = "$resDir\Fm.rc"
+        $dest = $fmTarget
+        Write-Host "执行：Copy-Item -Force -Path $source -Destination $dest"
+        Copy-Item -Force -Path $source -Destination $dest -ErrorAction Stop
+        Write-Host "✅ Fm.rc替换成功" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ Fm.rc替换失败：$($_.Exception.Message)" -ForegroundColor Red
     }
-} catch {
-    Write-Host "⚠️ Fm.rc替换失败（不影响构建）：$($_.Exception.Message)" -ForegroundColor Yellow
+} else {
+    Write-Host "❌ Fm.rc路径缺失（本地/源码）" -ForegroundColor Red
 }
 
-# 4. 替换工具栏图标
+# ==================== 替换工具栏图标（ToolBarIcons/*.bmp） ====================
 $toolBarTarget = "$BuildDirectory\CPP\7zip\UI\FileManager"
-try {
-    if (Test-Path "$resDir\ToolBarIcons\*.bmp" -and Test-Path $toolBarTarget) {
-        Copy-Item -Force -Path "$resDir\ToolBarIcons\*.bmp" -Destination $toolBarTarget -ErrorAction Stop
-        Write-Host "✅ 替换工具栏图标完成" -ForegroundColor Green
-    } else {
-        Write-Host "⚠️ 工具栏图标路径缺失（不影响构建）" -ForegroundColor Yellow
+Write-Host "`n--- 替换工具栏图标 ---" -ForegroundColor Cyan
+Write-Host "目标路径：$toolBarTarget"
+if (Test-Path "$resDir\ToolBarIcons\*.bmp" -and Test-Path $toolBarTarget) {
+    try {
+        $source = "$resDir\ToolBarIcons\*.bmp"
+        $dest = $toolBarTarget
+        Write-Host "执行：Copy-Item -Force -Path $source -Destination $dest"
+        Copy-Item -Force -Path $source -Destination $dest -ErrorAction Stop
+        Write-Host "✅ 工具栏图标替换成功" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ 工具栏图标替换失败：$($_.Exception.Message)" -ForegroundColor Red
     }
-} catch {
-    Write-Host "⚠️ 工具栏图标替换失败（不影响构建）：$($_.Exception.Message)" -ForegroundColor Yellow
+} else {
+    Write-Host "❌ 工具栏图标路径缺失（本地/源码）" -ForegroundColor Red
 }
 
-Write-Host "`n===== [兼容版资源替换] 执行完成（即使有警告，构建仍会继续） =====`n" -ForegroundColor Cyan
+Write-Host "`n===== [终极无参数资源替换] 执行完成 =====`n" -ForegroundColor Cyan
