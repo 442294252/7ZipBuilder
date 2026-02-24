@@ -31,14 +31,15 @@ jobs:
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Pack.ps1
 
-      # 关键：先把安装包复制到工作目录根目录
-      - name: Copy installer to root
+      # 关键：定位安装包，避免“自己覆盖自己”
+      - name: Locate installer
         shell: pwsh
         run: |
           $installer = Get-ChildItem -Path . -Recurse -Filter "*.exe" | Select-Object -First 1
           if ($installer) {
-            Copy-Item -Path $installer.FullName -Destination .\
-            Write-Host "✅ 已复制安装包到工作目录：$($installer.Name)"
+            $installerPath = $installer.FullName
+            Write-Host "✅ 找到安装包：$installerPath"
+            echo "INSTALLER_PATH=$installerPath" >> $env:GITHUB_ENV
             echo "INSTALLER_NAME=$($installer.Name)" >> $env:GITHUB_ENV
           } else {
             Write-Error "❌ 未找到任何 .exe 安装包"
@@ -56,13 +57,13 @@ jobs:
           draft: false
           prerelease: false
 
-      # 直接上传 .exe 到 Release，不再经过 Artifact 打包
+      # 直接使用找到的路径上传，不再复制
       - name: Upload Installer to Release
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./${{ env.INSTALLER_NAME }}  # 直接使用找到的安装包名
+          asset_path: ${{ env.INSTALLER_PATH }}  # 直接使用找到的完整路径
           asset_name: 7z-${{ env.BUILD_VERSION }}-Custom-Icon.exe
           asset_content_type: application/x-msdownload
