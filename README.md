@@ -7,8 +7,6 @@
 [7-Zip](https://www.7-zip.org/) 的自动编译脚本，用于更简便的从源代码定制它。
 
 ## 已更新2600的版本在release，感谢原版大佬
-利用豆包修改的脚本以及原大佬的资源弄的
-主要修改了Build.yaml。豆包编写了数个版本的脚本一一试下来，编译成功了。
 
 
 <img width="589" height="360" alt="image" src="https://github.com/user-attachments/assets/f98cf8f3-8268-41b3-ad8f-2a791f7af5e8" />
