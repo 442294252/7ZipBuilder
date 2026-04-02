@@ -9,14 +9,17 @@ jobs:
       - name: Check out git repository
         uses: actions/checkout@v4
 
-      - name: Set fixed version 26.00 (NO NETWORK REQUEST)
+      - name: Get latest 7-Zip version from GitHub API
         shell: pwsh
         run: |
-          $displayVer = "26.00"
-          $numVer = "2600"
+          $api = "https://api.github.com/repos/ip7z/7zip/releases/latest"
+          $response = Invoke-RestMethod -Uri $api -UseBasicParsing
+          $tag = $response.tag_name
+          $displayVer = $tag.Replace("7z","").Insert(2,".")
+          $numVer = $tag.Replace("7z","")
           "7z$numVer" | Out-File -FilePath 7zVer.txt -Encoding utf8
           $displayVer | Out-File -FilePath 7zDisplayVer.txt -Encoding utf8
-          Write-Output "✅ Fixed version: 7-Zip $displayVer (7z$numVer)"
+          Write-Output "✅ Latest version: $displayVer (7z$numVer)"
 
       - name: Prepare
         shell: pwsh
