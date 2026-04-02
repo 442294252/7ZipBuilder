@@ -1,59 +1,32 @@
 name: Build
 on:
   - workflow_dispatch
-
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - name: Check out git repository
         uses: actions/checkout@v4
-
-      - name: Get latest 7-Zip version automatically (还原原版逻辑)
+      - name: Get latest version
         shell: pwsh
         run: |
-          # 完全还原原版代码，无超时、无重试，和原版100%一致
           $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html'
           $7zVerMatchInfo = Select-String -InputObject $7zHtml.Content -Pattern 'Download 7-Zip ([\d.]+) \(\d{4}-\d{2}-\d{2}\)'
           $7zVer = $7zVerMatchInfo.Matches.Groups[1].Value.Replace('.', '')
-          $7zDisplayVer = $7zVerMatchInfo.Matches.Groups[1].Value
           Set-Content -Path 7zVer.txt -Value "7z$7zVer"
-          Set-Content -Path 7zDisplayVer.txt -Value $7zDisplayVer
-          Write-Output "The latest version of 7-Zip is 7z$7zVer ($7zDisplayVer)."
-
+          Write-Output "The latest version of 7-Zip is 7z$7zVer."
       - name: Prepare
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Prepare.ps1
-
       - name: Build
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Build.ps1
-
       - name: Pack
         shell: pwsh
         run: Get-Content -Path 7zVer.txt | .\Pack.ps1
-
-      - name: Upload artifact (NO compression)
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: 7-Zip Installer
           path: ./*.exe
           if-no-files-found: error
-          compression: none
-
-      - name: Prepare version for Release
-        shell: pwsh
-        run: |
-          $ver = Get-Content 7zDisplayVer.txt
-          echo "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Create Release & Upload EXE
-        uses: softprops/action-gh-release@v2
-        with:
-          name: 7-Zip ${{ env.VERSION }} Custom Icon
-          tag_name: v${{ env.VERSION }}-custom
-          files: ./*.exe
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
