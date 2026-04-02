@@ -6,73 +6,43 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Check out git repository
+      - name: Check out
         uses: actions/checkout@v4
 
-      - name: Get latest 7-Zip version from GitHub API (with error handling)
+      - name: Get latest version
         shell: pwsh
         run: |
-          try {
-            $api = "https://api.github.com/repos/ip7z/7zip/releases/latest"
-            $response = Invoke-RestMethod -Uri $api -UseBasicParsing -TimeoutSec 30
-            $tag = $response.tag_name
-            Write-Host "✅ 获取到最新Tag: $tag"
-            
-            # 版本号处理（兼容26.00/26.01等格式）
-            $numVer = $tag -replace '7z', ''
-            $displayVer = $numVer -replace '(\d{2})(\d{2})', '$1.$2'
-            Write-Host "✅ 解析版本号: $displayVer (7z$numVer)"
-            
-            # 写入版本文件
-            "7z$numVer" | Out-File -FilePath 7zVer.txt -Encoding utf8
-            $displayVer | Out-File -FilePath 7zDisplayVer.txt -Encoding utf8
-            Write-Host "✅ 版本文件写入完成"
-          } catch {
-            Write-Error "❌ 获取版本号失败: $_"
-            exit 1
-          }
+          $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html'
+          $match = $7zHtml.Content | Select-String -Pattern 'Download 7-Zip ([\d.]+)'
+          $ver = $match.Matches.Groups[1].Value
+          $verFile = "7z$($ver.Replace('.',''))"
+          Set-Content 7zVer.txt -Value $verFile
+          echo "VERSION=$verFile" >> $env:GITHUB_ENV
+          echo "VERSION_TAG=$ver" >> $env:GITHUB_ENV
 
       - name: Prepare
         shell: pwsh
-        run: |
-          $ver = Get-Content 7zVer.txt
-          Write-Host "🚀 执行Prepare步骤，版本: $ver"
-          .\Prepare.ps1 -BuildVersion $ver
+        run: Get-Content 7zVer.txt | .\Prepare.ps1
 
       - name: Build
         shell: pwsh
-        run: |
-          $ver = Get-Content 7zVer.txt
-          Write-Host "🚀 执行Build步骤，版本: $ver"
-          .\Build.ps1 -BuildVersion $ver
+        run: Get-Content 7zVer.txt | .\Build.ps1
 
       - name: Pack
         shell: pwsh
-        run: |
-          $ver = Get-Content 7zVer.txt
-          Write-Host "🚀 执行Pack步骤，版本: $ver"
-          .\Pack.ps1 -BuildVersion $ver
+        run: Get-Content 7zVer.txt | .\Pack.ps1
 
-      - name: Upload artifact (NO compression)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 7-Zip Installer
+          name: 7-Zip
           path: ./*.exe
-          if-no-files-found: error
-          compression: none
 
-      - name: Prepare version for Release
-        shell: pwsh
-        run: |
-          $ver = Get-Content 7zDisplayVer.txt
-          echo "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "✅ Release版本号: $ver"
-
-      - name: Create Release & Upload EXE
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: 7-Zip ${{ env.VERSION }} Custom Icon
-          tag_name: v${{ env.VERSION }}-custom
+          name: 7-Zip ${{ env.VERSION_TAG }}
+          tag_name: ${{ env.VERSION_TAG }}
           files: ./*.exe
           draft: false
           prerelease: false
