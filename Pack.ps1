@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-7-Zip 打包脚本 - 终版（修复乱码+图标+所有历史问题）
+7-Zip 打包脚本 - 终版（修复ResourceHacker下载+乱码+图标+所有历史问题）
 #>
 param(
     [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
@@ -67,14 +67,14 @@ if (-not (Test-Path $langDstDir)) { New-Item -ItemType Directory -Path $langDstD
 if (Test-Path $langSrcDir) { Copy-Item -Path "$langSrcDir\*" -Destination "$langDstDir\" -Recurse -Force }
 
 # ==============================================
-# 5. 生成标准安装包（修复乱码核心：GB2312编码）
+# 5. 生成标准安装包（修复乱码：GB2312编码）
 # ==============================================
 # 提取官方安装SFX
 $sfxSrc = "$buildDir\CPP\7zip\Bundles\SFXSetup\x64\7zS.sfx"
 if (-not (Test-Path $sfxSrc)) { throw "❌ 未找到SFX模块: $sfxSrc" }
 Copy-Item -Path $sfxSrc -Destination "$sfxDir\7zS.sfx" -Force
 
-# 🔧 核心修复1：用GB2312编码保存配置文件，彻底解决乱码
+# 安装配置（GB2312编码，彻底解决乱码）
 $configContent = @"
 ;!@Install@!UTF-8!
 Title="7-Zip $verNum 安装"
@@ -83,9 +83,8 @@ InstallPath="%ProgramFiles%\7-Zip"
 GUIMode="2"
 ;!@InstallEnd@!
 "@
-# 用GB2312编码保存，SFX完美识别中文，不再乱码
-$utf8 = [System.Text.Encoding]::GetEncoding('gb2312')
-[System.IO.File]::WriteAllText("$sfxDir\config.txt", $configContent, $utf8)
+$gb2312 = [System.Text.Encoding]::GetEncoding('gb2312')
+[System.IO.File]::WriteAllText("$sfxDir\config.txt", $configContent, $gb2312)
 
 # 打包文件（-mx=0 不压缩）
 & "$outDir\7z.exe" a -t7z -mx=0 "$sfxDir\app.7z" "$outDir\*"
@@ -102,9 +101,9 @@ foreach ($f in $filesToCombine) {
 $fs.Close()
 
 # ==============================================
-# 🔧 核心修复2：给EXE注入官方7-Zip图标（和原版一致）
+# 🔧 核心修复：修正ResourceHacker下载链接+图标注入
 # ==============================================
-# 从官方7z.exe提取图标
+# 1. 从官方7z.exe提取图标
 $sourceExe = "$outDir\7z.exe"
 $iconPath = "$iconDir\7z.ico"
 if (-not (Test-Path $sourceExe)) { throw "❌ 未找到源EXE: $sourceExe" }
@@ -113,14 +112,17 @@ Add-Type -AssemblyName System.Drawing
 $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($sourceExe)
 $icon.ToBitmap().Save($iconPath, [System.Drawing.Imaging.ImageFormat]::Icon)
 
-# 用ResourceHacker注入图标
+# 2. 下载ResourceHacker（修正为正确的GitHub Release链接）
 $rhPath = "$tempDir\ResourceHacker.exe"
 if (-not (Test-Path $rhPath)) {
     Write-Host "🔧 下载ResourceHacker..."
-    Invoke-WebRequest -Uri "https://github.com/angusj/resourcehacker/releases/download/v5.2.7/reshacker.zip" -OutFile "$tempDir\rh.zip"
+    # 正确的v5.2.7下载链接
+    $rhUrl = "https://github.com/angusj/resourcehacker/releases/download/v5.2.7/ResourceHacker_5.2.7.zip"
+    Invoke-WebRequest -Uri $rhUrl -OutFile "$tempDir\rh.zip" -ErrorAction Stop
     Expand-Archive -Path "$tempDir\rh.zip" -DestinationPath "$tempDir" -Force
 }
 
+# 3. 注入图标到最终EXE
 Write-Host "🔧 注入7-Zip官方图标到EXE..."
 & "$rhPath" -open "$tempExe" -save "$finalExe" -action addoverwrite -res "$iconPath" -mask ICONGROUP,MAINICON,
 if ($LASTEXITCODE -ne 0) { throw "❌ 图标注入失败" }
