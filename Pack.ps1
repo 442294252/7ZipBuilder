@@ -1,136 +1,63 @@
-<#
-.SYNOPSIS
-7-Zip 打包脚本 - 终版（修复ResourceHacker下载+乱码+图标+所有历史问题）
-#>
 param(
     [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
     [string] $BuildVersion
 )
 
-$ErrorActionPreference = "Stop"
 $workDir = $PSScriptRoot
-$tempDir = "$workDir\Temp"
 $buildDir = "$workDir\$BuildVersion"
+$tempDir = "$workDir\Temp"
+$packDir = "$tempDir\Pack"
+$prebuildDir = "$tempDir\PreBuild"
 $outDir = "$tempDir\Out"
-$sfxDir = "$tempDir\SFX"
-$iconDir = "$tempDir\Icon"
 
-# ==============================================
-# 1. 版本号自动提取（兼容所有格式）
-# ==============================================
-if ($BuildVersion -match '7z(\d+)') {
-    $verNum = $matches[1]
-} elseif ($BuildVersion -match '(\d+)\.(\d+)') {
-    $verNum = "$($matches[1])$($matches[2])"
-} else {
-    throw "❌ 版本号格式错误: $BuildVersion"
-}
-$exeName = "7-Zip-$verNum-Custom-Icon.exe"
-$finalExe = "$workDir\$exeName"
-
-# ==============================================
-# 2. 确保目录存在
-# ==============================================
-@($tempDir, $outDir, $sfxDir, $iconDir) | ForEach-Object {
-    if (-not (Test-Path $_)) { New-Item -ItemType Directory -Path $_ -Force | Out-Null }
+if (-not (Test-Path $tempDir)) {
+    New-Item -ItemType Directory -Path $tempDir
 }
 
-# ==============================================
-# 3. 拷贝编译产物（原逻辑不变）
-# ==============================================
-$filesToCopy = @(
-    @{Src = "$buildDir\CPP\7zip\Bundles\Format7zF\x64\7z.dll"; Dst = "$outDir\7z.dll"},
-    @{Src = "$buildDir\CPP\7zip\UI\Console\x64\7z.exe"; Dst = "$outDir\7z.exe"},
-    @{Src = "$buildDir\CPP\7zip\UI\FileManager\x64\7zFM.exe"; Dst = "$outDir\7zFM.exe"},
-    @{Src = "$buildDir\CPP\7zip\UI\GUI\x64\7zG.exe"; Dst = "$outDir\7zG.exe"},
-    @{Src = "$buildDir\CPP\7zip\Bundles\SFXWin\x64\7z.sfx"; Dst = "$outDir\7z.sfx"},
-    @{Src = "$buildDir\CPP\7zip\Bundles\SFXCon\x64\7zCon.sfx"; Dst = "$outDir\7zCon.sfx"},
-    @{Src = "$buildDir\CPP\7zip\UI\Explorer\x64\7-zip.dll"; Dst = "$outDir\7-zip64.dll"},
-    @{Src = "$buildDir\CPP\7zip\UI\Explorer\x86\7-zip.dll"; Dst = "$outDir\7-zip32.dll"},
-    @{Src = "$buildDir\C\Util\7zipUninstall\x64\7zipUninstall.exe"; Dst = "$outDir\Uninstall.exe"}
-)
-foreach ($file in $filesToCopy) {
-    if (Test-Path $file.Src) { Copy-Item -Path $file.Src -Destination $file.Dst -Force }
+if (-not (Test-Path $outDir)) {
+    New-Item -ItemType Directory -Path $outDir
 }
 
-# ==============================================
-# 4. 从源码提取文档/语言包（零网络）
-# ==============================================
-$docSrcDir = "$buildDir\DOC"
-$resFiles = @("History.txt", "License.txt", "readme.txt")
-foreach ($f in $resFiles) {
-    if (Test-Path "$docSrcDir\$f") { Copy-Item -Path "$docSrcDir\$f" -Destination "$outDir\$f" -Force }
-}
-$langSrcDir = "$buildDir\CPP\7zip\UI\GUI\Lang"
-$langDstDir = "$outDir\Lang"
-if (-not (Test-Path $langDstDir)) { New-Item -ItemType Directory -Path $langDstDir -Force | Out-Null }
-if (Test-Path $langSrcDir) { Copy-Item -Path "$langSrcDir\*" -Destination "$langDstDir\" -Recurse -Force }
-
-# ==============================================
-# 5. 生成标准安装包（修复乱码：GB2312编码）
-# ==============================================
-# 提取官方安装SFX
-$sfxSrc = "$buildDir\CPP\7zip\Bundles\SFXSetup\x64\7zS.sfx"
-if (-not (Test-Path $sfxSrc)) { throw "❌ 未找到SFX模块: $sfxSrc" }
-Copy-Item -Path $sfxSrc -Destination "$sfxDir\7zS.sfx" -Force
-
-# 安装配置（GB2312编码，彻底解决乱码）
-$configContent = @"
-;!@Install@!UTF-8!
-Title="7-Zip $verNum 安装"
-BeginPrompt="是否安装 7-Zip $verNum？"
-InstallPath="%ProgramFiles%\7-Zip"
-GUIMode="2"
-;!@InstallEnd@!
-"@
-$gb2312 = [System.Text.Encoding]::GetEncoding('gb2312')
-[System.IO.File]::WriteAllText("$sfxDir\config.txt", $configContent, $gb2312)
-
-# 打包文件（-mx=0 不压缩）
-& "$outDir\7z.exe" a -t7z -mx=0 "$sfxDir\app.7z" "$outDir\*"
-if ($LASTEXITCODE -ne 0) { throw "❌ 打包失败" }
-
-# 拼接生成临时EXE（无图标）
-$tempExe = "$sfxDir\temp.exe"
-$filesToCombine = @("$sfxDir\7zS.sfx", "$sfxDir\config.txt", "$sfxDir\app.7z")
-$fs = [System.IO.File]::Create($tempExe)
-foreach ($f in $filesToCombine) {
-    $bytes = [System.IO.File]::ReadAllBytes($f)
-    $fs.Write($bytes, 0, $bytes.Length)
-}
-$fs.Close()
-
-# ==============================================
-# 🔧 核心修复：修正ResourceHacker下载链接+图标注入
-# ==============================================
-# 1. 从官方7z.exe提取图标
-$sourceExe = "$outDir\7z.exe"
-$iconPath = "$iconDir\7z.ico"
-if (-not (Test-Path $sourceExe)) { throw "❌ 未找到源EXE: $sourceExe" }
-
-Add-Type -AssemblyName System.Drawing
-$icon = [System.Drawing.Icon]::ExtractAssociatedIcon($sourceExe)
-$icon.ToBitmap().Save($iconPath, [System.Drawing.Imaging.ImageFormat]::Icon)
-
-# 2. 下载ResourceHacker（修正为正确的GitHub Release链接）
-$rhPath = "$tempDir\ResourceHacker.exe"
-if (-not (Test-Path $rhPath)) {
-    Write-Host "🔧 下载ResourceHacker..."
-    # 正确的v5.2.7下载链接
-    $rhUrl = "https://github.com/angusj/resourcehacker/releases/download/v5.2.7/ResourceHacker_5.2.7.zip"
-    Invoke-WebRequest -Uri $rhUrl -OutFile "$tempDir\rh.zip" -ErrorAction Stop
-    Expand-Archive -Path "$tempDir\rh.zip" -DestinationPath "$tempDir" -Force
+if (-not (Test-Path $prebuildDir)) {
+    New-Item -ItemType Directory -Path $prebuildDir
 }
 
-# 3. 注入图标到最终EXE
-Write-Host "🔧 注入7-Zip官方图标到EXE..."
-& "$rhPath" -open "$tempExe" -save "$finalExe" -action addoverwrite -res "$iconPath" -mask ICONGROUP,MAINICON,
-if ($LASTEXITCODE -ne 0) { throw "❌ 图标注入失败" }
+if (-not (Test-Path $packDir)) {
+    New-Item -ItemType Directory -Path $packDir
+}
 
-# 清理临时文件
-Remove-Item $tempExe -Force -ErrorAction SilentlyContinue
+# 拷贝打包文件
+Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\Bundles\Format7zF\x64\7z.dll"
+Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\UI\Console\x64\7z.exe"
+Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\UI\FileManager\x64\7zFM.exe"
+Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\UI\GUI\x64\7zG.exe"
+Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\Bundles\SFXWin\x64\7z.sfx"
+Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\Bundles\SFXCon\x64\7zCon.sfx"
+Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\UI\Explorer\x64\7-zip.dll"
+Copy-Item -Destination "$outDir\7-zip32.dll" -Path "$buildDir\CPP\7zip\UI\Explorer\x86\7-zip.dll"
+Copy-Item -Destination "$outDir\Uninstall.exe" -Path "$buildDir\C\Util\7zipUninstall\x64\7zipUninstall.exe"
 
-Write-Host "✅ Pack步骤执行完成！"
-Write-Host "📦 输出文件: $finalExe"
-Write-Host "🎨 已注入官方图标，中文弹窗正常显示！"
-exit 0
+# 下载并解压预编译包
+if (-not (Test-Path "$tempDir\$BuildVersion-pre.7z")) {
+    Invoke-WebRequest -Uri "https://7-zip.org/a/$BuildVersion-x64.exe" -OutFile "$tempDir\$BuildVersion-pre.7z"
+    & "$outDir\7z.exe" x "$tempDir\$BuildVersion-pre.7z" -o"$prebuildDir"
+}
+
+# 拷贝预编译文件
+Copy-Item -Destination $outDir -Path "$prebuildDir\History.txt"
+Copy-Item -Destination $outDir -Path "$prebuildDir\License.txt"
+Copy-Item -Destination $outDir -Path "$prebuildDir\readme.txt"
+Copy-Item -Destination $outDir -Path "$prebuildDir\7-zip.chm"
+Copy-Item -Destination $outDir -Path "$prebuildDir\descript.ion"
+if (-not (Test-Path "$outDir\Lang")) {
+    New-Item -ItemType Directory -Path "$outDir\Lang"
+}
+Copy-Item -Recurse -Force -Destination "$outDir\Lang" -Path "$prebuildDir\Lang\*"
+
+# 拷贝打包工具
+Copy-Item -Recurse -Force -Destination $packDir -Path "$outDir\*"
+Copy-Item -Destination "$packDir\7z.sfx" -Path "$buildDir\C\Util\7zipInstall\x64\7zipInstall.exe"
+Copy-Item -Destination "$packDir\7zCon.sfx" -Path "$buildDir\C\Util\7zipInstall\x64\7zipInstall.exe"
+
+# 打包
+& "$packDir\7z.exe" a -sfx -t7z -mx=9 -m0=LZMA -r "$workDir\$BuildVersion.exe" "$outDir\*"
