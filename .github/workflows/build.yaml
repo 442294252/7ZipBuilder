@@ -1,4 +1,4 @@
-name: Build
+name: Build from Official 7-Zip Repo
 on:
   workflow_dispatch:
 
@@ -6,72 +6,37 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Check out git repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Get latest 7-Zip version from GitHub API (with error handling)
+      - name: 安装 Git
+        run: choco install git -y
+
+      - name: 获取最新版本
         shell: pwsh
         run: |
-          try {
-            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ip7z/7zip/releases/latest" -ErrorAction Stop
-            $verTag = $release.tag_name
-            $verFile = "7z$($verTag -replace '\.', '')"
-            Set-Content 7zVer.txt -Value $verFile
-            echo "VERSION=$verFile" >> $env:GITHUB_ENV
-            echo "VERSION_TAG=$verTag" >> $env:GITHUB_ENV
-            echo "获取最新版本成功: $verFile (标签: $verTag)"
-          }
-          catch {
-            Write-Error "获取版本失败: $_"
-            exit 1
-          }
+          $tag = (Invoke-RestMethod https://api.github.com/repos/ip7z/7zip/releases/latest).tag_name
+          $verFile = "7z$($tag -replace '\.','')"
+          Set-Content 7zVer.txt $verFile
+          echo "VERSION=$verFile" >> $env:GITHUB_ENV
+          echo "VERSION_TAG=$tag" >> $env:GITHUB_ENV
 
-      - name: Prepare
+      - name: 准备源码（官方GitHub）
         shell: pwsh
-        run: |
-          $ver = Get-Content 7zVer.txt
-          .\Prepare.ps1 -BuildVersion $ver
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+        run: .\Prepare.ps1 -BuildVersion (Get-Content 7zVer.txt)
 
-      - name: Build
+      - name: 编译
         shell: pwsh
-        run: |
-          $ver = Get-Content 7zVer.txt
-          .\Build.ps1 -BuildVersion $ver
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+        run: .\Build.ps1 -BuildVersion (Get-Content 7zVer.txt)
 
-      - name: Pack (NO compression)
+      - name: 打包（不压缩）
         shell: pwsh
-        run: |
-          $ver = Get-Content 7zVer.txt
-          .\Pack.ps1 -BuildVersion $ver
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+        run: .\Pack.ps1 -BuildVersion (Get-Content 7zVer.txt)
 
-      - name: Upload artifact (NO compression)
-        uses: actions/upload-artifact@v4
-        with:
-          name: 7-Zip
-          path: ./*.exe
-          compression-level: 0
-
-      - name: Prepare version for Release
-        shell: pwsh
-        run: |
-          echo "RELEASE_NAME=7-Zip ${{ env.VERSION_TAG }}" >> $env:GITHUB_ENV
-          echo "RELEASE_FILE=./${{ env.VERSION }}.exe" >> $env:GITHUB_ENV
-
-      - name: Create Release & Upload EXE
+      - name: 发布 Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ env.RELEASE_NAME }}
-          tag_name: ${{ env.VERSION_TAG }}
-          files: ${{ env.RELEASE_FILE }}
-          draft: false
-          prerelease: false
+          name: "7-Zip ${{ env.VERSION_TAG }}"
+          tag_name: "${{ env.VERSION_TAG }}"
+          files: ./*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Post Check out git repository
-        shell: pwsh
-        run: |
-          Write-Host "构建流程全部完成 ✅"
