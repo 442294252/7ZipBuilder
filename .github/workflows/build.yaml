@@ -9,10 +9,27 @@ jobs:
       - name: Check out git repository
         uses: actions/checkout@v4
 
-      - name: Get latest 7-Zip version automatically
+      - name: Get latest 7-Zip version automatically (fixed timeout)
         shell: pwsh
         run: |
-          $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html' -UseBasicParsing
+          # 加超时+重试，解决GitHub Actions网络问题
+          $maxRetry = 3
+          $retryCount = 0
+          do {
+              try {
+                  $7zHtml = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html' -UseBasicParsing -TimeoutSec 30
+                  break
+              } catch {
+                  $retryCount++
+                  Write-Warning "请求超时，重试第 $retryCount 次..."
+                  Start-Sleep -Seconds 5
+              }
+          } while ($retryCount -lt $maxRetry)
+
+          if (-not $7zHtml) {
+              throw "多次重试后仍无法连接7-Zip官网，构建终止"
+          }
+
           $pattern = 'Download 7-Zip ([0-9]+\.[0-9]+)'
           $match = [regex]::Match($7zHtml.Content, $pattern)
           $displayVer = $match.Groups[1].Value
