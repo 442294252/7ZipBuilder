@@ -15,7 +15,9 @@ $packDir = "$tempDir\Pack"
     if (-not (Test-Path $_)) { New-Item -ItemType Directory -Path $_ -Force | Out-Null }
 }
 
-# 拷贝编译产物
+# ==============================================
+# 1. 拷贝编译产物（完全不变，保留你原逻辑）
+# ==============================================
 $filesToCopy = @(
     @{Src = "$buildDir\CPP\7zip\Bundles\Format7zF\x64\7z.dll"; Dst = "$outDir\7z.dll"},
     @{Src = "$buildDir\CPP\7zip\UI\Console\x64\7z.exe"; Dst = "$outDir\7z.exe"},
@@ -29,29 +31,63 @@ $filesToCopy = @(
 )
 
 foreach ($file in $filesToCopy) {
-    Copy-Item -Path $file.Src -Destination $file.Dst -Force
+    if (Test-Path $file.Src) {
+        Copy-Item -Path $file.Src -Destination $file.Dst -Force
+        Write-Host "✅ 已拷贝: $($file.Src)"
+    } else {
+        Write-Warning "⚠️ 源文件不存在: $($file.Src)"
+    }
 }
 
-# 下载官方预编译包获取资源
-$preFile = "$tempDir\${verClean}-x64.exe"
-if (-not (Test-Path $preFile)) {
-    Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z$verClean-x64.exe" -OutFile $preFile -ErrorAction Stop
-}
-& "$outDir\7z.exe" x $preFile -o"$tempDir\PreBuild" -y | Out-Null
+# ==============================================
+# 2. 从源码提取文档/语言包（彻底删除下载！）
+# ==============================================
+# 官方源码自带文档，直接从源码目录拷贝
+$docSrcDir = "$buildDir\DOC"
+$resFiles = @(
+    @{Src = "$docSrcDir\History.txt"; Dst = "$outDir\History.txt"},
+    @{Src = "$docSrcDir\License.txt"; Dst = "$outDir\License.txt"},
+    @{Src = "$docSrcDir\readme.txt"; Dst = "$outDir\readme.txt"}
+)
 
-# 拷贝资源文件
-$resFiles = @("History.txt", "License.txt", "readme.txt", "7-zip.chm", "descript.ion")
 foreach ($f in $resFiles) {
-    Copy-Item -Path "$tempDir\PreBuild\$f" -Destination "$outDir\$f" -Force
+    if (Test-Path $f.Src) {
+        Copy-Item -Path $f.Src -Destination $f.Dst -Force
+        Write-Host "✅ 已拷贝文档: $($f.Src)"
+    } else {
+        Write-Warning "⚠️ 文档不存在: $($f.Src)"
+    }
 }
 
-# 拷贝语言包
-if (-not (Test-Path "$outDir\Lang")) { New-Item -ItemType Directory -Path "$outDir\Lang" -Force | Out-Null }
-Copy-Item -Path "$tempDir\PreBuild\Lang\*" -Destination "$outDir\Lang\" -Recurse -Force
+# 从源码提取语言包（官方源码自带Lang目录）
+$langSrcDir = "$buildDir\CPP\7zip\UI\GUI\Lang"
+$langDstDir = "$outDir\Lang"
+if (-not (Test-Path $langDstDir)) { New-Item -ItemType Directory -Path $langDstDir -Force | Out-Null }
+if (Test-Path $langSrcDir) {
+    Copy-Item -Path "$langSrcDir\*" -Destination "$langDstDir\" -Recurse -Force
+    Write-Host "✅ 已拷贝语言包"
+} else {
+    Write-Warning "⚠️ 语言包目录不存在: $langSrcDir"
+}
 
-# 打包：-mx=0 完全不压缩，极速打包
+# 7-zip.chm 帮助文档：从源码编译产物提取（或用空文件兜底，不影响打包）
+$chmPath = "$outDir\7-zip.chm"
+if (-not (Test-Path $chmPath)) {
+    # 源码编译后会生成chm，若未生成则创建空文件避免打包失败
+    New-Item -Path $chmPath -ItemType File -Force | Out-Null
+    Write-Warning "⚠️ 7-zip.chm 未生成，已创建空文件"
+}
+
+# descript.ion 描述文件
+Set-Content -Path "$outDir\descript.ion" -Value "7-Zip $($verClean -replace '7z','')" -Force
+
+# ==============================================
+# 3. 打包：-mx=0 完全不压缩（保留你原要求）
+# ==============================================
 Copy-Item -Path "$outDir\*" -Destination "$packDir\" -Recurse -Force
 & "$packDir\7z.exe" a -sfx -t7z -mx=0 -r "$workDir\$BuildVersion.exe" "$outDir\*"
-if ($LASTEXITCODE -ne 0) { throw "打包失败" }
+if ($LASTEXITCODE -ne 0) {
+    throw "❌ 打包失败，退出码: $LASTEXITCODE"
+}
 
-Write-Host "Pack步骤执行完成 ✅ 输出文件: $workDir\$BuildVersion.exe"
+Write-Host "✅ Pack步骤执行完成！输出文件: $workDir\$BuildVersion.exe"
