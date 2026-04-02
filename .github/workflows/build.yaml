@@ -1,42 +1,50 @@
-name: Build from Official 7-Zip Repo
+name: Build
 on:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 Git
-        run: choco install git -y
-
-      - name: 获取最新版本
+      - name: Get latest 7-Zip version
         shell: pwsh
         run: |
           $tag = (Invoke-RestMethod https://api.github.com/repos/ip7z/7zip/releases/latest).tag_name
           $verFile = "7z$($tag -replace '\.','')"
-          Set-Content 7zVer.txt $verFile
+          $verNumber = $verFile.Replace("7z","")
+          Set-Content 7zVer.txt -Value $verFile
           echo "VERSION=$verFile" >> $env:GITHUB_ENV
-          echo "VERSION_TAG=$tag" >> $env:GITHUB_ENV
+          echo "VER_NUM=$verNumber" >> $env:GITHUB_ENV
+          echo "RELEASE_NAME=7-Zip $verNumber Custom Icon" >> $env:GITHUB_ENV
+          echo "EXE_NAME=7-Zip-$verNumber-Custom-Icon.exe" >> $env:GITHUB_ENV
 
-      - name: 准备源码（官方GitHub）
+      - name: Prepare
         shell: pwsh
         run: .\Prepare.ps1 -BuildVersion (Get-Content 7zVer.txt)
 
-      - name: 编译
+      - name: Build
         shell: pwsh
         run: .\Build.ps1 -BuildVersion (Get-Content 7zVer.txt)
 
-      - name: 打包（不压缩）
+      - name: Pack
         shell: pwsh
         run: .\Pack.ps1 -BuildVersion (Get-Content 7zVer.txt)
 
-      - name: 发布 Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 7-Zip-Custom
+          path: .\7-Zip-*.exe
+          compression-level: 0
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "7-Zip ${{ env.VERSION_TAG }}"
-          tag_name: "${{ env.VERSION_TAG }}"
-          files: ./*.exe
+          name: "${{ env.RELEASE_NAME }}"
+          tag_name: "${{ env.VER_NUM }}"
+          files: ${{ env.EXE_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
