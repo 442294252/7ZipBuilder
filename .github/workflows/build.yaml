@@ -1,4 +1,4 @@
-name: Build
+name: Build 7-Zip Custom (终版)
 on:
   workflow_dispatch:
 
@@ -7,44 +7,64 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Get latest 7-Zip version
+      - name: Get latest 7-Zip version (自动获取最新版)
         shell: pwsh
         run: |
-          $tag = (Invoke-RestMethod https://api.github.com/repos/ip7z/7zip/releases/latest).tag_name
-          $verFile = "7z$($tag -replace '\.','')"
-          $verNumber = $verFile.Replace("7z","")
+          $ErrorActionPreference = "Stop"
+          # 从官方GitHub API获取最新版本
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ip7z/7zip/releases/latest" -ErrorAction Stop
+          $verTag = $release.tag_name
+          $verFile = "7z$($verTag -replace '\.','')" # 26.00 -> 7z2600
+          $verNum = $verTag -replace '\.','' # 26.00 -> 2600
+          
+          # 写入环境变量，全程自动传递
           Set-Content 7zVer.txt -Value $verFile
           echo "VERSION=$verFile" >> $env:GITHUB_ENV
-          echo "VER_NUM=$verNumber" >> $env:GITHUB_ENV
-          echo "RELEASE_NAME=7-Zip $verNumber Custom Icon" >> $env:GITHUB_ENV
-          echo "EXE_NAME=7-Zip-$verNumber-Custom-Icon.exe" >> $env:GITHUB_ENV
+          echo "VER_TAG=$verTag" >> $env:GITHUB_ENV
+          echo "VER_NUM=$verNum" >> $env:GITHUB_ENV
+          echo "RELEASE_NAME=7-Zip $verNum Custom Icon" >> $env:GITHUB_ENV
+          echo "EXE_NAME=7-Zip-$verNum-Custom-Icon.exe" >> $env:GITHUB_ENV
+          
+          Write-Host "✅ 获取最新版本成功: $verFile (标签: $verTag)"
 
-      - name: Prepare
+      - name: Prepare (零网络、零复制错误)
         shell: pwsh
-        run: .\Prepare.ps1 -BuildVersion (Get-Content 7zVer.txt)
+        run: |
+          $ver = Get-Content 7zVer.txt
+          .\Prepare.ps1 -BuildVersion $ver
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
-      - name: Build
+      - name: Build (编译源码)
         shell: pwsh
-        run: .\Build.ps1 -BuildVersion (Get-Content 7zVer.txt)
+        run: |
+          $ver = Get-Content 7zVer.txt
+          .\Build.ps1 -BuildVersion $ver
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
-      - name: Pack
+      - name: Pack (带安装向导、不压缩、自动版本号)
         shell: pwsh
-        run: .\Pack.ps1 -BuildVersion (Get-Content 7zVer.txt)
+        run: |
+          $ver = Get-Content 7zVer.txt
+          .\Pack.ps1 -BuildVersion $ver
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
-      - name: Upload artifact
+      - name: Upload artifact (不压缩)
         uses: actions/upload-artifact@v4
         with:
-          name: 7-Zip-Custom
+          name: 7-Zip-Custom-Icon
           path: .\7-Zip-*.exe
           compression-level: 0
 
-      - name: Create Release
+      - name: Create Release (自动发布，名称自动变)
         uses: softprops/action-gh-release@v2
         with:
-          name: "${{ env.RELEASE_NAME }}"
-          tag_name: "${{ env.VER_NUM }}"
+          name: ${{ env.RELEASE_NAME }}
+          tag_name: ${{ env.VER_NUM }}
           files: ${{ env.EXE_NAME }}
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
