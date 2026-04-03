@@ -1,0 +1,100 @@
+name: Build-Fixed-Version
+on:
+  # 手动运行时，可选择官方仓库的Tag版本
+  workflow_dispatch:
+    inputs:
+      OFFICIAL_TAG:
+        description: "7-Zip官方仓库Tag（从官方Tags页面复制，比如26.00/25.01/25.00）"
+        required: true
+        default: "26.00" # 默认最新版，可修改为任意官方Tag
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v4
+
+      # 校验你输入的Tag是否在官方仓库存在，避免输错
+      - name: Validate official tag & get file info
+        id: validate_tag
+        shell: pwsh
+        run: |
+          try {
+            # 你输入的官方Tag
+            $inputTag = "${{ github.event.inputs.OFFICIAL_TAG }}"
+            Write-Host "✅ 你选择的官方Tag: $inputTag"
+
+            # 调用官方API，校验Tag是否存在
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ip7z/7zip/releases/tags/$inputTag" -UseBasicParsing -TimeoutSec 30
+            
+            # 严格匹配官方文件名规则：Tag去掉小数点，拼接7z前缀
+            $filePrefix = "7z$($inputTag.Replace('.', ''))"
+            Write-Host "✅ 官方文件名前缀: $filePrefix"
+
+            # 匹配官方Assets里的文件
+            $sourceFileName = "$filePrefix-src.7z"
+            $prebuildFileName = "$filePrefix-x64.exe"
+            Write-Host "🔍 匹配源码包: $sourceFileName"
+            Write-Host "🔍 匹配预编译包: $prebuildFileName"
+
+            # 校验文件是否存在
+            $sourceAsset = $release.assets | Where-Object { $_.name -eq $sourceFileName }
+            $prebuildAsset = $release.assets | Where-Object { $_.name -eq $prebuildFileName }
+
+            if (-not $sourceAsset) { throw "❌ 官方Tag $inputTag 中未找到源码包 $sourceFileName" }
+            if (-not $prebuildAsset) { throw "❌ 官方Tag $inputTag 中未找到预编译包 $prebuildFileName" }
+
+            # 写入文件&传递环境变量
+            $inputTag | Out-File -FilePath 7zOfficialTag.txt -Encoding utf8
+            $filePrefix | Out-File -FilePath 7zFilePrefix.txt -Encoding utf8
+            $inputTag | Out-File -FilePath 7zDisplayVer.txt -Encoding utf8
+
+            echo "OFFICIAL_TAG=$inputTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "FILE_PREFIX=$filePrefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "DISPLAY_VER=$inputTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "SOURCE_URL=$($sourceAsset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "PREBUILD_URL=$($prebuildAsset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+            Write-Host "✅ Tag校验通过，版本信息获取完成" -ForegroundColor Green
+          } catch {
+            Write-Error "❌ 校验失败: $_"
+            exit 1
+          }
+
+      - name: Prepare
+        shell: pwsh
+        run: |
+          .\Prepare.ps1 -FilePrefix $env:FILE_PREFIX -SourceDownloadUrl $env:SOURCE_URL
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $prefix = Get-Content 7zFilePrefix.txt
+          Write-Host "🚀 执行Build步骤，版本前缀: $prefix"
+          .\Build.ps1 -BuildVersion $prefix
+
+      - name: Pack
+        shell: pwsh
+        run: |
+          .\Pack.ps1 -FilePrefix $env:FILE_PREFIX -PrebuildDownloadUrl $env:PREBUILD_URL
+
+      - name: Upload artifact (NO compression)
+        uses: actions/upload-artifact@v4
+        with:
+          name: 7-Zip ${{ env.DISPLAY_VER }} Installer
+          path: ./*.exe
+          if-no-files-found: error
+          compression: none
+
+      - name: Create Release & Upload EXE
+        uses: softprops/action-gh-release@v2
+        with:
+          # 自动匹配你选的版本号生成标题
+          name: 7-Zip ${{ env.DISPLAY_VER }} Custom Icon
+          tag_name: v${{ env.DISPLAY_VER }}-custom
+          files: ./*.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
