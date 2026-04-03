@@ -9,49 +9,50 @@ jobs:
       - name: Check out git repository
         uses: actions/checkout@v4
 
-      # ✅ 严格匹配官方仓库命名规则，100%不出现匹配错误
+      # ✅ 100%严格使用官方原始Tag，不做任何修改，彻底避免匹配错误
       - name: Get latest 7-Zip info from official GitHub
         id: get_7zip
         shell: pwsh
         run: |
           try {
-            # 调用官方仓库API，获取最新Release
+            # 1. 调用官方API，获取完整Release信息
             $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ip7z/7zip/releases/latest" -UseBasicParsing -TimeoutSec 30
             
-            # 官方Tag格式：7z2600，直接提取，不做多余修改，避免匹配错误
+            # 2. 【关键】直接使用官方原始Tag，不做任何修改！官方Tag格式：7z2600
             $officialTag = $release.tag_name
-            Write-Host "✅ 官方最新Tag: $officialTag"
+            Write-Host "✅ 官方原始Tag: $officialTag"
 
-            # 提取纯数字版本号（2600）和显示版本号（26.00）
+            # 3. 仅提取显示用的版本号（只用于Release标题，不用于文件名匹配）
             $numVer = $officialTag.Replace("7z", "")
             $displayVer = $numVer.Insert(2, ".")
-            Write-Host "✅ 版本号: $displayVer (纯数字: $numVer)"
+            Write-Host "✅ 显示版本号: $displayVer"
 
-            # 严格匹配官方文件名，100%不会出错
+            # 4. 【关键】用官方原始Tag匹配文件名，和官方100%一致
             $sourceFileName = "$officialTag-src.7z"
             $prebuildFileName = "$officialTag-x64.exe"
-            Write-Host "🔍 匹配源码包: $sourceFileName"
-            Write-Host "🔍 匹配预编译包: $prebuildFileName"
+            Write-Host "🔍 匹配源码包文件名: $sourceFileName"
+            Write-Host "🔍 匹配预编译包文件名: $prebuildFileName"
 
-            # 从官方Release资产中匹配文件
+            # 5. 从官方Release里精准匹配文件
             $sourceAsset = $release.assets | Where-Object { $_.name -eq $sourceFileName }
             $prebuildAsset = $release.assets | Where-Object { $_.name -eq $prebuildFileName }
 
-            # 匹配失败直接抛出明确错误
-            if (-not $sourceAsset) { throw "❌ 官方Release中未找到源码包: $sourceFileName" }
-            if (-not $prebuildAsset) { throw "❌ 官方Release中未找到预编译包: $prebuildFileName" }
+            # 6. 匹配失败直接抛出明确错误
+            if (-not $sourceAsset) { throw "❌ 官方Release中未找到源码包，请检查文件名匹配" }
+            if (-not $prebuildAsset) { throw "❌ 官方Release中未找到预编译包，请检查文件名匹配" }
 
-            # 写入文件，给后续脚本使用
-            $officialTag | Out-File -FilePath 7zTag.txt -Encoding utf8
+            # 7. 写入文件&传递变量，给后续所有步骤使用
+            $officialTag | Out-File -FilePath 7zOfficialTag.txt -Encoding utf8
             $displayVer | Out-File -FilePath 7zDisplayVer.txt -Encoding utf8
 
-            # 传递变量给后续步骤
             echo "OFFICIAL_TAG=$officialTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             echo "DISPLAY_VER=$displayVer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             echo "SOURCE_URL=$($sourceAsset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             echo "PREBUILD_URL=$($prebuildAsset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+            Write-Host "✅ 版本信息获取完成，无匹配错误" -ForegroundColor Green
           } catch {
-            Write-Error "❌ 获取7-Zip信息失败: $_"
+            Write-Error "❌ 流程失败: $_"
             exit 1
           }
 
@@ -63,7 +64,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          $tag = Get-Content 7zTag.txt
+          $tag = Get-Content 7zOfficialTag.txt
           Write-Host "🚀 执行Build步骤，版本: $tag"
           .\Build.ps1 -BuildVersion $tag
 
@@ -83,6 +84,7 @@ jobs:
       - name: Create Release & Upload EXE
         uses: softprops/action-gh-release@v2
         with:
+          # 你要的标题格式，自动更新版本号
           name: 7-Zip ${{ env.DISPLAY_VER }} Custom Icon
           tag_name: v${{ env.DISPLAY_VER }}-custom
           files: ./*.exe
