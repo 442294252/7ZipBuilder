@@ -18,7 +18,7 @@ if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Forc
 if (-not (Test-Path $prebuildDir)) { New-Item -ItemType Directory -Path $prebuildDir -Force | Out-Null }
 if (-not (Test-Path $packDir)) { New-Item -ItemType Directory -Path $packDir -Force | Out-Null }
 
-# 拷贝编译好的主程序
+# 拷贝编译好的主程序文件
 Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\Bundles\Format7zF\x64\7z.dll"
 Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\UI\Console\x64\7z.exe"
 Copy-Item -Destination $outDir -Path "$buildDir\CPP\7zip\UI\FileManager\x64\7zFM.exe"
@@ -36,7 +36,7 @@ if (-not (Test-Path $prebuildZipPath)) {
     Invoke-WebRequest -Uri $PrebuildDownloadUrl -OutFile $prebuildZipPath -UseBasicParsing
 }
 
-# 解压预编译包（文档、语言包）
+# 解压预编译包（文档、语言包等）
 & "$outDir\7z.exe" x "$prebuildZipPath" -o"$prebuildDir" -y
 
 # 拷贝文档和语言包
@@ -55,6 +55,6 @@ Copy-Item -Recurse -Force -Destination $packDir -Path "$outDir\*"
 Copy-Item -Destination "$packDir\7z.sfx" -Path "$buildDir\C\Util\7zipInstall\x64\7zipInstall.exe"
 Copy-Item -Destination "$packDir\7zCon.sfx" -Path "$buildDir\C\Util\7zipInstall\x64\7zipInstall.exe"
 
-# 打包成最终安装包
+# 打包成最终安装程序
 & "$packDir\7z.exe" a -sfx -t7z -mx=9 -m0=LZMA -r "$workDir\$OfficialTag.exe" "$outDir\*"
 Write-Host "✅ Pack步骤完成，安装包已生成" -ForegroundColor Green
