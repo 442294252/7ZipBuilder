@@ -9,41 +9,49 @@ jobs:
       - name: Check out git repository
         uses: actions/checkout@v4
 
-      # ✅ 全自动从GitHub官方仓库抓最新版本（内网稳定，永不访问7-zip.org）
-      - name: Get latest 7-Zip version from GitHub API
-        id: get_version
+      # ✅ 只调用1次GitHub API，获取所有需要的信息，彻底避免重复调用报错
+      - name: Get latest 7-Zip full info from GitHub API
+        id: get_7zip_info
         shell: pwsh
         run: |
           try {
-            # 只访问GitHub官方仓库，Actions内网访问，100%稳定
+            # 仅调用1次官方仓库API，获取最新Release完整信息
             $api = "https://api.github.com/repos/ip7z/7zip/releases/latest"
-            $response = Invoke-RestMethod -Uri $api -UseBasicParsing -TimeoutSec 30
-            $tag = $response.tag_name
-            Write-Host "✅ 官方最新Tag: $tag"
+            $release = Invoke-RestMethod -Uri $api -UseBasicParsing -TimeoutSec 30
             
-            # 版本号处理，和你现有脚本100%兼容
+            # 解析版本号（和你现有脚本100%兼容）
+            $tag = $release.tag_name
             $numVer = $tag -replace '7z', ''
             $displayVer = $numVer -replace '(\d{2})(\d{2})', '$1.$2'
-            Write-Host "✅ 解析版本号: $displayVer (7z$numVer)"
-            
-            # 写入版本文件，给后续Prepare/Pack脚本用
+            Write-Host "✅ 官方最新版本: $displayVer (7z$numVer)"
+
+            # 匹配源码包、64位安装包的下载链接（提前匹配好，避免后续脚本重复调用）
+            $sourceAsset = $release.assets | Where-Object { $_.name -eq "$tag-src.7z" }
+            $prebuildAsset = $release.assets | Where-Object { $_.name -eq "$tag-x64.exe" }
+
+            # 空值校验，匹配不到直接抛出明确错误
+            if (-not $sourceAsset) { throw "❌ 未匹配到源码包: $tag-src.7z" }
+            if (-not $prebuildAsset) { throw "❌ 未匹配到预编译包: $tag-x64.exe" }
+
+            # 写入版本文件，给后续脚本使用
             "7z$numVer" | Out-File -FilePath 7zVer.txt -Encoding utf8
             $displayVer | Out-File -FilePath 7zDisplayVer.txt -Encoding utf8
-            
-            # 传递给后续Release步骤
+
+            # 把下载链接、版本号传递给后续所有步骤，彻底避免重复调用API
+            echo "SOURCE_DOWNLOAD_URL=$($sourceAsset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "PREBUILD_DOWNLOAD_URL=$($prebuildAsset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             echo "VERSION=$displayVer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            echo "NUM_VERSION=$numVer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           } catch {
-            Write-Error "❌ 获取版本号失败: $_"
+            Write-Error "❌ 获取7-Zip信息失败: $_"
             exit 1
           }
 
       - name: Prepare
         shell: pwsh
         run: |
-          $ver = Get-Content 7zVer.txt
-          Write-Host "🚀 执行Prepare步骤，版本: $ver"
-          .\Prepare.ps1 -BuildVersion $ver
+          # 直接用提前获取好的下载链接和版本号，不再重复调用API
+          .\Prepare.ps1 -BuildVersion $env:TAG -SourceDownloadUrl $env:SOURCE_DOWNLOAD_URL
 
       - name: Build
         shell: pwsh
@@ -55,9 +63,8 @@ jobs:
       - name: Pack
         shell: pwsh
         run: |
-          $ver = Get-Content 7zVer.txt
-          Write-Host "🚀 执行Pack步骤，版本: $ver"
-          .\Pack.ps1 -BuildVersion $ver
+          # 直接用提前获取好的预编译包链接，不再重复调用API
+          .\Pack.ps1 -BuildVersion $env:TAG -PrebuildDownloadUrl $env:PREBUILD_DOWNLOAD_URL
 
       - name: Upload artifact (NO compression)
         uses: actions/upload-artifact@v4
@@ -70,9 +77,8 @@ jobs:
       - name: Create Release & Upload EXE
         uses: softprops/action-gh-release@v2
         with:
-          # 你要的标题格式，自动更新版本号
+          # 你要的固定标题格式，自动更新版本号
           name: 7-Zip ${{ env.VERSION }} Custom Icon
-          # Tag自动生成，避免重复
           tag_name: v${{ env.VERSION }}-custom
           files: ./*.exe
           draft: false
