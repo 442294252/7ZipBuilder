@@ -1,6 +1,8 @@
 param(
-    [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-    [string] $BuildVersion
+    [Parameter(Mandatory = $true)]
+    [string] $BuildVersion,
+    [Parameter(Mandatory = $true)]
+    [string] $SourceDownloadUrl
 )
 
 $workDir = $PSScriptRoot
@@ -12,31 +14,24 @@ if (-not (Test-Path $tempDir)) {
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 }
 
-# ======================================================================
-# 🔥 彻底删除访问 7-zip.org 的代码，改用 GitHub 官方源（绝对稳定）
-# ======================================================================
-
-# 2. 从 GitHub 下载源码（内网稳定，完全不碰 7-zip.org）
+# 2. 用提前获取好的链接下载源码，不再重复调用GitHub API，彻底避免匹配失败
 $sourceZipPath = "$tempDir\$BuildVersion-src.7z"
 if (-not (Test-Path $sourceZipPath)) {
-    Write-Host "🔽 Downloading source code from GitHub..." -ForegroundColor Cyan
-    $api = "https://api.github.com/repos/ip7z/7zip/releases/latest"
-    $response = Invoke-RestMethod -Uri $api -UseBasicParsing
-    $sourceAsset = $response.assets | Where-Object { $_.name -eq "$BuildVersion-src.7z" }
-    Invoke-WebRequest -Uri $sourceAsset.browser_download_url -OutFile $sourceZipPath -UseBasicParsing
+    Write-Host "🔽 下载源码包: $BuildVersion" -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $SourceDownloadUrl -OutFile $sourceZipPath -UseBasicParsing
 }
 
-# 3. 用系统自带 7z 解压源码（GitHub Runner 自带，无需下载 7zr.exe）
+# 3. 用系统自带7z解压源码，无需下载7zr.exe
 if (-not (Test-Path $buildDir)) {
-    Write-Host "📦 Extracting source code..." -ForegroundColor Gray
+    Write-Host "📦 解压源码包" -ForegroundColor Gray
     7z x $sourceZipPath -o"$buildDir" -y | Out-Null
 }
 
-# 4. 调用子流程替换图标（完全不受影响）
+# 4. 调用子流程替换图标（完全兼容你现有的图标替换逻辑）
 $subPrepareScript = "$workDir\SubPrepare.ps1"
 if (Test-Path $subPrepareScript) {
-    Write-Host "🎨 Applying custom icon..." -ForegroundColor Cyan
+    Write-Host "🎨 执行自定义图标替换" -ForegroundColor Cyan
     & $subPrepareScript $buildDir $BuildVersion
 }
 
-Write-Host "✅ Prepare completed successfully" -ForegroundColor Green
+Write-Host "✅ Prepare步骤完成" -ForegroundColor Green
