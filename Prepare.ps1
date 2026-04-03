@@ -1,27 +1,27 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string] $OfficialTag,
+    [string] $FilePrefix,
     [Parameter(Mandatory = $true)]
     [string] $SourceDownloadUrl
 )
 
 $workDir = $PSScriptRoot
 $tempDir = "$workDir\Temp"
-$buildDir = "$workDir\$OfficialTag"
+$buildDir = "$workDir\$FilePrefix"
 
 # 创建目录
 if (-not (Test-Path $tempDir)) {
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 }
 
-# 下载源码包（用提前匹配好的官方链接，零匹配错误）
-$sourceZipPath = "$tempDir\$OfficialTag-src.7z"
+# 下载源码包（文件名和官方完全一致：7z2600-src.7z）
+$sourceZipPath = "$tempDir\$FilePrefix-src.7z"
 if (-not (Test-Path $sourceZipPath)) {
-    Write-Host "🔽 下载官方源码包: $OfficialTag-src.7z" -ForegroundColor Cyan
+    Write-Host "🔽 下载官方源码包: $FilePrefix-src.7z" -ForegroundColor Cyan
     Invoke-WebRequest -Uri $SourceDownloadUrl -OutFile $sourceZipPath -UseBasicParsing
 }
 
-# 解压源码（用系统自带7z，无需额外下载7zr.exe）
+# 解压源码到对应目录（目录名和文件名前缀一致：7z2600）
 if (-not (Test-Path $buildDir)) {
     Write-Host "📦 解压源码包到: $buildDir" -ForegroundColor Gray
     7z x $sourceZipPath -o"$buildDir" -y | Out-Null
@@ -31,7 +31,7 @@ if (-not (Test-Path $buildDir)) {
 $subPrepareScript = "$workDir\SubPrepare.ps1"
 if (Test-Path $subPrepareScript) {
     Write-Host "🎨 执行自定义图标替换" -ForegroundColor Cyan
-    & $subPrepareScript $buildDir $OfficialTag
+    & $subPrepareScript $buildDir $FilePrefix
 }
 
-Write-Host "✅ Prepare步骤全部完成" -ForegroundColor Green
+Write-Host "✅ Prepare步骤完成" -ForegroundColor Green
