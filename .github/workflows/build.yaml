@@ -18,6 +18,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 新增：缓存官方安装器7zS.sfx，双分支共用，解决zstd无SFXSetup问题
+      - name: Cache 官方7zS.sfx安装模块
+        id: cache_sfx
+        uses: actions/cache@v4
+        with:
+          path: _CacheSFX
+          key: sfx-mainline-static-v1
+      - name: 缓存缺失 → 编译官方7zS.sfx
+        if: steps.cache_sfx.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # 临时拉官方源码编译安装SFX
+          git clone https://github.com/ip7z/7zip _tmp_mainline_sfx
+          Set-Location _tmp_mainline_sfx/CPP/7zip
+          # 加载VS编译环境
+          $vsInstall = & "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Import-Module "$vsInstall\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vsInstall -DevCmdArguments "-arch=amd64 -host_arch=amd64" -SkipAutomaticLocation
+          # 仅编译安装包模块
+          Set-Location Bundles/SFXSetup
+          nmake PLATFORM=x64
+          # 输出到缓存目录
+          New-Item -Path ../../../../_CacheSFX -ItemType Directory -Force | Out-Null
+          Copy-Item x64/7zS.sfx ../../../../_CacheSFX/7zS.sfx -Force
+          Set-Location $PSScriptRoot
+          Remove-Item _tmp_mainline_sfx -Recurse -Force
+
       - name: 获取对应仓库最新Release
         shell: pwsh
         run: |
@@ -31,17 +59,21 @@ jobs:
             $prefix = "7z$verNum"
             $releaseTitle = "7-Zip $verNum Custom Icon"
             $exeName = "$prefix-Custom-Icon.exe"
+            # 官方使用原版tag
+            $releaseTag = $fullTag
           } else {
             # zstd mcmilk/7-Zip-zstd tag: v26.02-v1.5.7
             $api = "https://api.github.com/repos/mcmilk/7-Zip-zstd/releases/latest"
             $release = Invoke-RestMethod -Uri $api
             $fullTag = $release.tag_name
-            # 拆分版本 v26.02-v1.5.7 → 2602
+            # 拆分 v26.02-v1.5.7 提取主版本
             $verBase = $fullTag -split "-v" | Select-Object -First 1
             $verNum = $verBase.TrimStart('v') -replace '\.', ''
             $prefix = "7z$verNum"
             $releaseTitle = "7-Zip ZS $verNum Custom Icon"
             $exeName = "$prefix-ZS-Custom-Icon.exe"
+            # 修复关键：zstd长tag无法作为本仓库Release Tag，改用纯数字避免冲突
+            $releaseTag = "zs-$verNum"
           }
           # 全局环境变量传递
           echo "MODE=$mode" >> $env:GITHUB_ENV
@@ -50,22 +82,26 @@ jobs:
           echo "VER_NUM=$verNum" >> $env:GITHUB_ENV
           echo "RELEASE_TITLE=$releaseTitle" >> $env:GITHUB_ENV
           echo "EXE_NAME=$exeName" >> $env:GITHUB_ENV
+          echo "RELEASE_TAG=$releaseTag" >> $env:GITHUB_ENV
           Set-Content 7zVer.txt $prefix
 
       - name: 源码准备（双脚本自动切换）
         shell: pwsh
         run: |
+          $pfx = Get-Content 7zVer.txt
           if ($env:MODE -eq "official") {
-            .\Prepare.ps1 -BuildVersion (Get-Content 7zVer.txt)
+            .\Prepare.ps1 -BuildVersion $pfx
           } else {
             .\PrepareZstd.ps1 -RawTag $env:FULL_TAG
           }
 
-      - name: 编译 Build（共用脚本，两套源码目录结构一致无需修改）
+      - name: 编译 Build（共用脚本）
         shell: pwsh
-        run: .\Build.ps1 -BuildVersion (Get-Content 7zVer.txt)
+        run: |
+          $pfx = Get-Content 7zVer.txt
+          .\Build.ps1 -BuildVersion $pfx
 
-      - name: 打包 Pack（共用脚本，自动输出区分文件名）
+      - name: 打包 Pack（共用缓存7zS.sfx，支持安装向导）
         shell: pwsh
         run: |
           $ver = Get-Content 7zVer.txt
@@ -76,6 +112,7 @@ jobs:
       - name: 上传制品
         uses: actions/upload-artifact@v4
         with:
+          name: ${{ env.EXE_NAME }}
           path: ./*.exe
           compression-level: 0
 
@@ -83,7 +120,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ env.RELEASE_TITLE }}
-          tag_name: ${{ env.FULL_TAG }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: ${{ env.EXE_NAME }}
           draft: false
         env:
