@@ -16,40 +16,41 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-      # 新增：预先安装MSVC编译环境，解决vswhere缺失
-      - name: Install MSVC Build Tools
+      # 全局提前安装MSVC编译环境
+      - name: Install MSVC x64 Build Tools
         uses: ilammy/setup-msvc-dev@v1
         with:
           arch: x64
           target: x64
 
-      # 缓存官方7zS.sfx安装模块
-      - name: Cache 官方7zS.sfx安装模块
+      # 缓存共用7zS.sfx安装模块
+      - name: Cache 7zS.sfx
         id: cache_sfx
         uses: actions/cache@v4
         with:
           path: _CacheSFX
           key: sfx-mainline-static-v1
-      - name: 缓存缺失 → 编译官方7zS.sfx
+
+      # 缓存缺失则编译官方7zS.sfx
+      - name: Build official 7zS.sfx if no cache
         if: steps.cache_sfx.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # 拉取官方原版源码
           git clone https://github.com/ip7z/7zip _tmp_mainline_sfx
           Set-Location _tmp_mainline_sfx/CPP/7zip
-          # 直接使用全局已加载MSVC环境，不再手动查找vs
           Set-Location Bundles/SFXSetup
           nmake PLATFORM=x64
-          # 输出至缓存目录
-          New-Item -Path ../../../../_CacheSFX -ItemType Directory -Force | Out-Null
+          New-Item -Path ../../../../_CacheSFX -Force -ItemType Directory | Out-Null
           Copy-Item x64/7zS.sfx ../../../../_CacheSFX/7zS.sfx -Force
           Set-Location $PSScriptRoot
           Remove-Item _tmp_mainline_sfx -Recurse -Force
 
-      - name: 获取对应仓库最新Release
+      # 获取版本信息
+      - name: Fetch latest release tag
         shell: pwsh
         run: |
           $mode = "${{ github.event.inputs.BuildMode }}"
@@ -82,7 +83,8 @@ jobs:
           echo "RELEASE_TAG=$releaseTag" >> $env:GITHUB_ENV
           Set-Content 7zVer.txt $prefix
 
-      - name: 源码准备（双脚本自动切换）
+      # 切换源码准备脚本
+      - name: Prepare source code
         shell: pwsh
         run: |
           $pfx = Get-Content 7zVer.txt
@@ -92,34 +94,34 @@ jobs:
             .\PrepareZstd.ps1 -RawTag $env:FULL_TAG
           }
 
-      # 编译前同样加载MSVC环境
-      - name: 编译 Build（共用脚本）
-        uses: ilammy/setup-msvc-dev@v1
-        with:
-          arch: x64
-          target: x64
+      # 编译源码
+      - name: Compile source
+        shell: pwsh
         run: |
           $pfx = Get-Content 7zVer.txt
           .\Build.ps1 -BuildVersion $pfx
 
-      - name: 打包 Pack（共用缓存7zS.sfx，支持安装向导）
+      # 打包生成安装程序
+      - name: Pack installer
         shell: pwsh
         run: |
           $ver = Get-Content 7zVer.txt
           .\Pack.ps1 -BuildVersion $ver
           Rename-Item "$ver.exe" "$env:EXE_NAME" -Force
 
-      - name: 上传制品
+      # 上传产物
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.EXE_NAME }}
           path: ./*.exe
           compression-level: 0
 
-      - name: 发布Release
+      # 创建Release
+      - name: Create Github Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ env.RELEASE_TITLE }}
+          name: ${{ env.RELEASE_NAME }}
           tag_name: ${{ env.RELEASE_TAG }}
           files: ${{ env.EXE_NAME }}
           draft: false
