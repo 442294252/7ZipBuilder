@@ -18,7 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 新增：缓存官方安装器7zS.sfx，双分支共用，解决zstd无SFXSetup问题
+      # 新增：预先安装MSVC编译环境，解决vswhere缺失
+      - name: Install MSVC Build Tools
+        uses: ilammy/setup-msvc-dev@v1
+        with:
+          arch: x64
+          target: x64
+
+      # 缓存官方7zS.sfx安装模块
       - name: Cache 官方7zS.sfx安装模块
         id: cache_sfx
         uses: actions/cache@v4
@@ -30,17 +37,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # 临时拉官方源码编译安装SFX
+          # 拉取官方原版源码
           git clone https://github.com/ip7z/7zip _tmp_mainline_sfx
           Set-Location _tmp_mainline_sfx/CPP/7zip
-          # 加载VS编译环境
-          $vsInstall = & "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          Import-Module "$vsInstall\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
-          Enter-VsDevShell -VsInstallPath $vsInstall -DevCmdArguments "-arch=amd64 -host_arch=amd64" -SkipAutomaticLocation
-          # 仅编译安装包模块
+          # 直接使用全局已加载MSVC环境，不再手动查找vs
           Set-Location Bundles/SFXSetup
           nmake PLATFORM=x64
-          # 输出到缓存目录
+          # 输出至缓存目录
           New-Item -Path ../../../../_CacheSFX -ItemType Directory -Force | Out-Null
           Copy-Item x64/7zS.sfx ../../../../_CacheSFX/7zS.sfx -Force
           Set-Location $PSScriptRoot
@@ -51,7 +54,6 @@ jobs:
         run: |
           $mode = "${{ github.event.inputs.BuildMode }}"
           if ($mode -eq "official") {
-            # 官方 ip7z/7zip tag: 26.00
             $api = "https://api.github.com/repos/ip7z/7zip/releases/latest"
             $release = Invoke-RestMethod -Uri $api
             $fullTag = $release.tag_name
@@ -59,23 +61,18 @@ jobs:
             $prefix = "7z$verNum"
             $releaseTitle = "7-Zip $verNum Custom Icon"
             $exeName = "$prefix-Custom-Icon.exe"
-            # 官方使用原版tag
             $releaseTag = $fullTag
           } else {
-            # zstd mcmilk/7-Zip-zstd tag: v26.02-v1.5.7
             $api = "https://api.github.com/repos/mcmilk/7-Zip-zstd/releases/latest"
             $release = Invoke-RestMethod -Uri $api
             $fullTag = $release.tag_name
-            # 拆分 v26.02-v1.5.7 提取主版本
             $verBase = $fullTag -split "-v" | Select-Object -First 1
             $verNum = $verBase.TrimStart('v') -replace '\.', ''
             $prefix = "7z$verNum"
             $releaseTitle = "7-Zip ZS $verNum Custom Icon"
             $exeName = "$prefix-ZS-Custom-Icon.exe"
-            # 修复关键：zstd长tag无法作为本仓库Release Tag，改用纯数字避免冲突
             $releaseTag = "zs-$verNum"
           }
-          # 全局环境变量传递
           echo "MODE=$mode" >> $env:GITHUB_ENV
           echo "FULL_TAG=$fullTag" >> $env:GITHUB_ENV
           echo "PREFIX=$prefix" >> $env:GITHUB_ENV
@@ -95,8 +92,12 @@ jobs:
             .\PrepareZstd.ps1 -RawTag $env:FULL_TAG
           }
 
+      # 编译前同样加载MSVC环境
       - name: 编译 Build（共用脚本）
-        shell: pwsh
+        uses: ilammy/setup-msvc-dev@v1
+        with:
+          arch: x64
+          target: x64
         run: |
           $pfx = Get-Content 7zVer.txt
           .\Build.ps1 -BuildVersion $pfx
@@ -106,7 +107,6 @@ jobs:
         run: |
           $ver = Get-Content 7zVer.txt
           .\Pack.ps1 -BuildVersion $ver
-          # 重命名区分ZS版本
           Rename-Item "$ver.exe" "$env:EXE_NAME" -Force
 
       - name: 上传制品
