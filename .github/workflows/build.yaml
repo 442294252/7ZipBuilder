@@ -1,129 +1,95 @@
-name: Dual Build Official / Zstd
+name: Build
 on:
   workflow_dispatch:
-    inputs:
-      BuildMode:
-        description: 构建模式 official / zstd
-        required: true
-        default: official
-        type: choice
-        options:
-          - official
-          - zstd
 
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
     steps:
-      - name: Checkout source
+      - name: Check out git repository
         uses: actions/checkout@v4
 
-      # 全局提前安装MSVC编译环境
-      - name: Install MSVC x64 Build Tools
-        uses: ilammy/setup-msvc-dev@v1
-        with:
-          arch: x64
-          target: x64
-
-      # 缓存共用7zS.sfx安装模块
-      - name: Cache 7zS.sfx
-        id: cache_sfx
-        uses: actions/cache@v4
-        with:
-          path: _CacheSFX
-          key: sfx-mainline-static-v1
-
-      # 缓存缺失则编译官方7zS.sfx
-      - name: Build official 7zS.sfx if no cache
-        if: steps.cache_sfx.outputs.cache-hit != 'true'
+      # 严格按照官方仓库规则，100%匹配Tag和文件名
+      - name: Get latest 7-Zip info from official GitHub
+        id: get_7zip
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          git clone https://github.com/ip7z/7zip _tmp_mainline_sfx
-          Set-Location _tmp_mainline_sfx/CPP/7zip
-          Set-Location Bundles/SFXSetup
-          nmake PLATFORM=x64
-          New-Item -Path ../../../../_CacheSFX -Force -ItemType Directory | Out-Null
-          Copy-Item x64/7zS.sfx ../../../../_CacheSFX/7zS.sfx -Force
-          Set-Location $PSScriptRoot
-          Remove-Item _tmp_mainline_sfx -Recurse -Force
+          try {
+            # 1. 调用官方API，获取最新Release
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ip7z/7zip/releases/latest" -UseBasicParsing -TimeoutSec 30
+            
+            # 2. 【严格匹配截图】官方Tag就是release.tag_name，值为26.00
+            $officialTag = $release.tag_name
+            Write-Host "✅ 官方仓库Tag: $officialTag"
 
-      # 获取版本信息
-      - name: Fetch latest release tag
-        shell: pwsh
-        run: |
-          $mode = "${{ github.event.inputs.BuildMode }}"
-          if ($mode -eq "official") {
-            $api = "https://api.github.com/repos/ip7z/7zip/releases/latest"
-            $release = Invoke-RestMethod -Uri $api
-            $fullTag = $release.tag_name
-            $verNum = $fullTag -replace '\.', ''
-            $prefix = "7z$verNum"
-            $releaseTitle = "7-Zip $verNum Custom Icon"
-            $exeName = "$prefix-Custom-Icon.exe"
-            $releaseTag = $fullTag
-          } else {
-            $api = "https://api.github.com/repos/mcmilk/7-Zip-zstd/releases/latest"
-            $release = Invoke-RestMethod -Uri $api
-            $fullTag = $release.tag_name
-            $verBase = $fullTag -split "-v" | Select-Object -First 1
-            $verNum = $verBase.TrimStart('v') -replace '\.', ''
-            $prefix = "7z$verNum"
-            $releaseTitle = "7-Zip ZS $verNum Custom Icon"
-            $exeName = "$prefix-ZS-Custom-Icon.exe"
-            $releaseTag = "zs-$verNum"
-          }
-          echo "MODE=$mode" >> $env:GITHUB_ENV
-          echo "FULL_TAG=$fullTag" >> $env:GITHUB_ENV
-          echo "PREFIX=$prefix" >> $env:GITHUB_ENV
-          echo "VER_NUM=$verNum" >> $env:GITHUB_ENV
-          echo "RELEASE_TITLE=$releaseTitle" >> $env:GITHUB_ENV
-          echo "EXE_NAME=$exeName" >> $env:GITHUB_ENV
-          echo "RELEASE_TAG=$releaseTag" >> $env:GITHUB_ENV
-          Set-Content 7zVer.txt $prefix
+            # 3. 【严格匹配截图】从Tag生成文件名前缀：Tag去掉小数点 → 26.00 → 2600 → 拼接7z → 7z2600
+            $filePrefix = "7z$($officialTag.Replace('.', ''))"
+            Write-Host "✅ 官方文件名前缀: $filePrefix"
 
-      # 切换源码准备脚本
-      - name: Prepare source code
-        shell: pwsh
-        run: |
-          $pfx = Get-Content 7zVer.txt
-          if ($env:MODE -eq "official") {
-            .\Prepare.ps1 -BuildVersion $pfx
-          } else {
-            .\PrepareZstd.ps1 -RawTag $env:FULL_TAG
+            # 4. 【严格匹配截图】生成和官方完全一致的文件名
+            $sourceFileName = "$filePrefix-src.7z"
+            $prebuildFileName = "$filePrefix-x64.exe"
+            Write-Host "🔍 匹配源码包文件名: $sourceFileName"
+            Write-Host "🔍 匹配预编译包文件名: $prebuildFileName"
+
+            # 5. 从官方Release的Assets里精准匹配文件
+            $sourceAsset = $release.assets | Where-Object { $_.name -eq $sourceFileName }
+            $prebuildAsset = $release.assets | Where-Object { $_.name -eq $prebuildFileName }
+
+            # 6. 匹配失败直接抛出明确错误
+            if (-not $sourceAsset) { throw "❌ 官方Assets中未找到源码包: $sourceFileName" }
+            if (-not $prebuildAsset) { throw "❌ 官方Assets中未找到预编译包: $prebuildFileName" }
+
+            # 7. 写入文件&传递环境变量，给后续步骤使用
+            $officialTag | Out-File -FilePath 7zOfficialTag.txt -Encoding utf8
+            $filePrefix | Out-File -FilePath 7zFilePrefix.txt -Encoding utf8
+            $officialTag | Out-File -FilePath 7zDisplayVer.txt -Encoding utf8
+
+            echo "OFFICIAL_TAG=$officialTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "FILE_PREFIX=$filePrefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "DISPLAY_VER=$officialTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "SOURCE_URL=$($sourceAsset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "PREBUILD_URL=$($prebuildAsset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+            Write-Host "✅ 版本信息获取完成，100%匹配官方规则" -ForegroundColor Green
+          } catch {
+            Write-Error "❌ 流程失败: $_"
+            exit 1
           }
 
-      # 编译源码
-      - name: Compile source
+      - name: Prepare
         shell: pwsh
         run: |
-          $pfx = Get-Content 7zVer.txt
-          .\Build.ps1 -BuildVersion $pfx
+          .\Prepare.ps1 -FilePrefix $env:FILE_PREFIX -SourceDownloadUrl $env:SOURCE_URL
 
-      # 打包生成安装程序
-      - name: Pack installer
+      - name: Build
         shell: pwsh
         run: |
-          $ver = Get-Content 7zVer.txt
-          .\Pack.ps1 -BuildVersion $ver
-          Rename-Item "$ver.exe" "$env:EXE_NAME" -Force
+          $prefix = Get-Content 7zFilePrefix.txt
+          Write-Host "🚀 执行Build步骤，版本前缀: $prefix"
+          .\Build.ps1 -BuildVersion $prefix
 
-      # 上传产物
-      - name: Upload artifact
+      - name: Pack
+        shell: pwsh
+        run: |
+          .\Pack.ps1 -FilePrefix $env:FILE_PREFIX -PrebuildDownloadUrl $env:PREBUILD_URL
+
+      - name: Upload artifact (NO compression)
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.EXE_NAME }}
+          name: 7-Zip Installer
           path: ./*.exe
-          compression-level: 0
+          if-no-files-found: error
+          compression: none
 
-      # 创建Release
-      - name: Create Github Release
+      - name: Create Release & Upload EXE
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ env.RELEASE_NAME }}
-          tag_name: ${{ env.RELEASE_TAG }}
-          files: ${{ env.EXE_NAME }}
+          # 你要的标题格式，和官方版本号完全一致
+          name: 7-Zip ${{ env.DISPLAY_VER }} Custom Icon
+          tag_name: v${{ env.DISPLAY_VER }}-custom
+          files: ./*.exe
           draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
